@@ -7,11 +7,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/baitang-bt/netease-music-float.git"
+    "url": "https://github.com/baitang-bt/-.git"
   },
-  "homepage": "https://github.com/baitang-bt/netease-music-float",
+  "homepage": "https://github.com/baitang-bt/-",
   "bugs": {
-    "url": "https://github.com/baitang-bt/netease-music-float/issues"
+    "url": "https://github.com/baitang-bt/-/issues"
   },
   "main": "electron/main.js",
   "scripts": {
@@ -65,7 +65,7 @@
       {
         "provider": "github",
         "owner": "baitang-bt",
-        "repo": "netease-music-float",
+        "repo": "-",
         "releaseType": "release"
       }
     ],
