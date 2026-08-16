@@ -53,6 +53,10 @@ let dragOrigin = null;
 let floatExpanded = false;
 /** Pending restore of the size limits relaxed for the resize animation. */
 let floatConstraintTimer = null;
+/** True while setBounds(..., true) is animating; blocks persist of intermediate heights. */
+let floatBoundsAnimating = false;
+/** Guards before-quit so async media/audio shutdown can finish before exit. */
+let isQuitting = false;
 let floatWidth = FLOAT_WIDTH_DEFAULT;
 let floatExpandedHeight = FLOAT_HEIGHT_EXPANDED_DEFAULT;
 let latestTrack = {
@@ -115,6 +119,7 @@ function setFloatExpanded(expanded) {
   floatWindow.setResizable(true);
   floatWindow.setMinimumSize(FLOAT_MIN_WIDTH, FLOAT_HEIGHT_COLLAPSED);
   floatWindow.setMaximumSize(FLOAT_MAX_WIDTH, FLOAT_MAX_EXPANDED_HEIGHT);
+  floatBoundsAnimating = true;
   floatWindow.setBounds(
     {
       x: bounds.x,
@@ -126,15 +131,20 @@ function setFloatExpanded(expanded) {
   );
 
   clearTimeout(floatConstraintTimer);
-  floatConstraintTimer = setTimeout(
-    applyFloatSizeConstraints,
-    FLOAT_RESIZE_ANIMATION_MS
-  );
+  floatConstraintTimer = setTimeout(() => {
+    floatBoundsAnimating = false;
+    applyFloatSizeConstraints();
+  }, FLOAT_RESIZE_ANIMATION_MS);
 }
 
 /** Persists the current expanded float size after the user resizes. */
 function persistFloatSizeFromWindow() {
-  if (!floatWindow || floatWindow.isDestroyed() || !floatExpanded) {
+  if (
+    !floatWindow ||
+    floatWindow.isDestroyed() ||
+    !floatExpanded ||
+    floatBoundsAnimating
+  ) {
     return;
   }
   const bounds = floatWindow.getBounds();
@@ -990,11 +1000,25 @@ app.on("activate", () => {
   }
 });
 
-app.on("before-quit", async () => {
-  await mediaController?.stop();
-  lyricsController?.stop();
-  if (silenceTimer) {
-    clearInterval(silenceTimer);
+app.on("before-quit", (event) => {
+  if (isQuitting) {
+    return;
   }
-  await audioCapture?.stop();
+  // Electron does not await this handler; preventDefault + app.exit so Windows
+  // can shut down the GSMTC backend process instead of leaving it orphaned.
+  event.preventDefault();
+  isQuitting = true;
+  (async () => {
+    try {
+      await mediaController?.stop();
+      lyricsController?.stop();
+      if (silenceTimer) {
+        clearInterval(silenceTimer);
+        silenceTimer = null;
+      }
+      await audioCapture?.stop();
+    } finally {
+      app.exit(0);
+    }
+  })();
 });

@@ -51,7 +51,8 @@
     "afterPack": "./scripts/after-pack.js",
     "asarUnpack": [
       "**/node_modules/audiotee/**",
-      "**/node_modules/windows-media-sessions/bin/**"
+      "**/node_modules/windows-media-sessions/**",
+      "**/node_modules/win-media-control/**"
     ],
     "publish": [
       {

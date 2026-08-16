@@ -15,7 +15,7 @@ const MUSIC_PLAYERS = [
     id: "netease",
     label: "网易云音乐",
     bundleIds: ["com.netease.163music", "com.netease.CloudMusic"],
-    namePattern: /网易云|NeteaseMusic|NetEase\s*Cloud\s*Music/i,
+    namePattern: /网易云|NeteaseMusic|NetEase\s*Cloud\s*Music|CloudMusic(\.exe)?/i,
     appNames: ["NeteaseMusic", "NetEaseMusic", "网易云音乐"],
     appFileNames: ["NeteaseMusic.app", "NetEaseMusic.app", "网易云音乐.app"],
     windowsUri: "orpheus://",
@@ -25,7 +25,7 @@ const MUSIC_PLAYERS = [
     id: "apple-music",
     label: "苹果音乐",
     bundleIds: ["com.apple.Music"],
-    namePattern: /^(Music|音乐|Apple\s*Music)$/i,
+    namePattern: /^(Music|音乐|Apple\s*Music)(\.exe)?$/i,
     appNames: ["Music", "音乐"],
     appFileNames: ["Music.app"],
     windowsUri: "music://",
@@ -45,7 +45,7 @@ const MUSIC_PLAYERS = [
     id: "spotify",
     label: "Spotify",
     bundleIds: ["com.spotify.client"],
-    namePattern: /^Spotify$/i,
+    namePattern: /^Spotify(\.exe)?$/i,
     appNames: ["Spotify"],
     appFileNames: ["Spotify.app"],
     windowsUri: "spotify://",
@@ -172,8 +172,10 @@ async function listInstalledPlayers() {
   if (process.platform === "win32") {
     const startApps = await listWindowsStartApps();
     return MUSIC_PLAYERS.filter((player) =>
-      startApps.some((entry) =>
-        player.namePattern.test(`${entry.Name || ""} ${entry.AppID || ""}`)
+      startApps.some(
+        (entry) =>
+          player.namePattern.test(entry.Name || "") ||
+          player.namePattern.test(entry.AppID || "")
       )
     ).map((player) => ({
       id: player.id,
@@ -212,13 +214,14 @@ function isPlayerNowPlaying(info, playerId) {
     return true;
   }
 
-  const name =
-    typeof info.displayName === "string"
-      ? info.displayName
-      : typeof info.appName === "string"
-        ? info.appName
-        : "";
-  return Boolean(name && player.namePattern.test(name));
+  /** True when a display or AUMID-like string matches the catalog pattern. */
+  function matchesName(value) {
+    return typeof value === "string" && value.length > 0 && player.namePattern.test(value);
+  }
+
+  // Test displayName and appName independently: Windows GSMTC often puts the
+  // AUMID (e.g. CloudMusic.exe) only in appName while displayName is localized.
+  return matchesName(info.displayName) || matchesName(info.appName);
 }
 
 /**

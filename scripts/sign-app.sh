@@ -6,7 +6,18 @@
 
 set -euo pipefail
 
-APP_PATH="${1:-dist/mac-arm64/NeteaseFloat.app}"
+# Resolve the default bundle for both arm64 (`mac-arm64`) and Intel (`mac`)
+# electron-builder output layouts.
+if [ -n "${1:-}" ]; then
+  APP_PATH="$1"
+elif [ -d "dist/mac-arm64/NeteaseFloat.app" ]; then
+  APP_PATH="dist/mac-arm64/NeteaseFloat.app"
+elif [ -d "dist/mac/NeteaseFloat.app" ]; then
+  APP_PATH="dist/mac/NeteaseFloat.app"
+else
+  APP_PATH="dist/mac-arm64/NeteaseFloat.app"
+fi
+
 IDENTITY_NAME="${NETEASEFLOAT_SIGN_IDENTITY:-NeteaseFloat Local}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -112,6 +112,11 @@ function setupClickExpand() {
 
   appRoot.addEventListener("pointerenter", () => {
     cancelCollapse();
+    // setExpanded(false) flips `expanded` before the fade finishes; re-expand
+    // so commitCollapse does not shrink the window under the cursor.
+    if (collapseFadeTimer) {
+      setExpanded(true);
+    }
   });
   appRoot.addEventListener("pointerleave", () => {
     if (!dragActive) {

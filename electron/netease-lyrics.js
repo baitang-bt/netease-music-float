@@ -355,8 +355,12 @@ function createLyricsController(options) {
     }
 
     const key = `${track.title}|${track.artist || ""}`;
-    if (key === cacheKey && cache) {
-      emitForTrack(track);
+    // Same identity: reuse cache, or keep the in-flight fetch (do not bump
+    // loadToken — artwork/play-state rebinds would otherwise drop the response).
+    if (key === cacheKey) {
+      if (cache) {
+        emitForTrack(track);
+      }
       return;
     }
 

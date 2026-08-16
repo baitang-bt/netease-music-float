@@ -110,6 +110,34 @@ describe("music players", () => {
     );
   });
 
+  it("matches Windows AUMID-only Now Playing metadata", () => {
+    assert.equal(
+      isPlayerNowPlaying({ appName: "CloudMusic.exe" }, "netease"),
+      true
+    );
+    assert.equal(
+      isPlayerNowPlaying({ appName: "Spotify.exe" }, "spotify"),
+      true
+    );
+    assert.equal(
+      isPlayerNowPlaying(
+        { displayName: "Other", appName: "CloudMusic.exe" },
+        "netease"
+      ),
+      true
+    );
+  });
+
+  it("matches Windows Start-menu Name and AppID separately", () => {
+    const spotify = getPlayerById("spotify");
+    const apple = getPlayerById("apple-music");
+    assert.ok(spotify.namePattern.test("Spotify"));
+    assert.equal(spotify.namePattern.test("Spotify Spotify.exe"), false);
+    assert.ok(spotify.namePattern.test("Spotify.exe"));
+    assert.ok(apple.namePattern.test("Apple Music"));
+    assert.equal(apple.namePattern.test("Apple Music Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"), false);
+  });
+
   it("exposes disk-detectable catalog entries", () => {
     assert.ok(MUSIC_PLAYERS.length >= 3);
     assert.ok(getPlayerById("spotify"));
