@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld("neteaseFloat", {
   /** Returns current settings from the main process. */
   getSettings: () => ipcRenderer.invoke("settings:get"),
 
+  /** Returns platform-specific feature availability for conditional UI. */
+  getPlatformCapabilities: () => ipcRenderer.invoke("platform:get-capabilities"),
+
   /**
    * Updates persisted settings.
    * @param {Record<string, unknown>} changes

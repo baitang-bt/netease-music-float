@@ -1,8 +1,8 @@
 {
   "name": "netease-music-float",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "macOS floating widget for local music players (NetEase, Apple Music, QQ Music, …) with real audio spectrum.",
+  "description": "Floating Now Playing widget for macOS and Windows music players.",
   "author": "baitang-bt",
   "license": "MIT",
   "repository": {
@@ -16,11 +16,12 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "node scripts/start-electron.js",
-    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/state-store.js && node --check electron/media-remote.js && node --check electron/music-players.js && node --check electron/auto-update.js && node --check electron/netease-app.js && node --check electron/netease-playback-mode.js && node --check electron/netease-lyrics.js && node --check electron/audio-capture.js && node --check electron/audio-permission.js && node --check electron/fft.js && node --check electron/netease-identity.js && node --check electron/paths.js && node --check src/float.js && node --check src/spectrum.js && node --check src/theme-colors.js && node --check src/title-fonts.js && node --check src/settings.js && node --check scripts/start-electron.js && node --test test/*.test.js",
+    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/state-store.js && node --check electron/media-controller.js && node --check electron/media-remote.js && node --check electron/windows-media-controller.js && node --check electron/music-players.js && node --check electron/auto-update.js && node --check electron/netease-app.js && node --check electron/netease-playback-mode.js && node --check electron/netease-lyrics.js && node --check electron/audio-capture.js && node --check electron/audio-permission.js && node --check electron/fft.js && node --check electron/netease-identity.js && node --check electron/paths.js && node --check src/float.js && node --check src/spectrum.js && node --check src/theme-colors.js && node --check src/title-fonts.js && node --check src/settings.js && node --check scripts/after-pack.js && node --check scripts/start-electron.js && node --test test/*.test.js",
     "sign:mac": "bash scripts/sign-app.sh",
-    "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac -c.electronDist=node_modules/electron/dist && npm run sign:mac",
+    "dist:mac": "bash scripts/ensure-signing-identity.sh && NETEASEFLOAT_SIGN_IDENTITY=\"NeteaseFloat Local\" CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac -c.electronDist=node_modules/electron/dist",
+    "dist:win": "electron-builder --win nsis --x64",
     "dist": "npm run dist:mac",
-    "release": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac zip dmg -c.electronDist=node_modules/electron/dist --publish always"
+    "release": "bash scripts/ensure-signing-identity.sh && NETEASEFLOAT_SIGN_IDENTITY=\"NeteaseFloat Local\" CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac zip dmg -c.electronDist=node_modules/electron/dist --publish always"
   },
   "devDependencies": {
     "electron": "43.1.1",
@@ -43,24 +44,14 @@
     ],
     "extraResources": [
       {
-        "from": "native",
-        "to": "native",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "node_modules/audiotee/bin/audiotee",
-        "to": "audiotee/audiotee"
-      },
-      {
         "from": "build/icon.png",
         "to": "icon.png"
       }
     ],
     "afterPack": "./scripts/after-pack.js",
     "asarUnpack": [
-      "**/node_modules/audiotee/**"
+      "**/node_modules/audiotee/**",
+      "**/node_modules/windows-media-sessions/bin/**"
     ],
     "publish": [
       {
@@ -81,12 +72,47 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "identity": null,
+      "extraResources": [
+        {
+          "from": "native",
+          "to": "native",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "node_modules/audiotee/bin/audiotee",
+          "to": "audiotee/audiotee"
+        }
+      ],
       "extendInfo": {
         "NSAudioCaptureUsageDescription": "NeteaseFloat 需要「仅系统音频录制」权限以绘制真实声浪频谱。"
       }
     },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
     "dmg": {
       "title": "NeteaseFloat ${version}"
     }
+  },
+  "optionalDependencies": {
+    "win-media-control": "^0.1.1",
+    "windows-media-sessions": "^1.0.3"
   }
 }

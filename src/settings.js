@@ -15,6 +15,7 @@ const accessibilityStatusEl = document.querySelector("#accessibility-status");
 const targetPlayerSelect = document.querySelector("#target-player");
 const openPlayerLabel = document.querySelector("#open-player-label");
 const playbackModeCard = document.querySelector("#playback-mode-card");
+const audioCaptureCard = document.querySelector("#audio-capture-card");
 const autoCheckUpdatesInput = document.querySelector("#auto-check-updates");
 const updateStatusEl = document.querySelector("#update-status");
 const checkUpdateBtn = document.querySelector("#btn-check-update");
@@ -25,6 +26,11 @@ const DEFAULT_SPECTRUM_COLOR = "#e60026";
 
 /** Cache of installed players from the main process. */
 let installedPlayers = [];
+/** Feature flags supplied by the main process for the current operating system. */
+let platformCapabilities = {
+  systemAudioCapture: false,
+  accessibilityPlaybackMode: false
+};
 
 /**
  * Fills the target-player <select> with locally installed catalog apps.
@@ -60,8 +66,10 @@ function populateTargetPlayerOptions(selectedId) {
 function updatePlayerDependentUi(playerId) {
   const player =
     installedPlayers.find((entry) => entry.id === playerId) || null;
-  const isNetease = playerId === "netease";
-  playbackModeCard.hidden = !isNetease;
+  const showsPlaybackMode =
+    playerId === "netease" &&
+    platformCapabilities.accessibilityPlaybackMode === true;
+  playbackModeCard.hidden = !showsPlaybackMode;
   openPlayerLabel.textContent = player
     ? `打开${player.label}`
     : "打开所选音乐软件";
@@ -93,8 +101,26 @@ async function refreshInstalledPlayers(settings) {
   updatePlayerDependentUi(targetPlayerSelect.value || selectedId);
 }
 
+/**
+ * Hides settings whose native implementation is unavailable on this platform.
+ * @param {{ systemAudioCapture?: boolean, accessibilityPlaybackMode?: boolean }} capabilities
+ */
+function applyPlatformCapabilities(capabilities) {
+  platformCapabilities = {
+    ...platformCapabilities,
+    ...(capabilities || {})
+  };
+  document.documentElement.dataset.platform =
+    capabilities?.platform || "unknown";
+  audioCaptureCard.hidden = !platformCapabilities.systemAudioCapture;
+  updatePlayerDependentUi(targetPlayerSelect.value || "netease");
+}
+
 /** Refreshes Accessibility trust status for playback-mode control. */
 async function refreshAccessibilityStatus() {
+  if (!platformCapabilities.accessibilityPlaybackMode) {
+    return;
+  }
   const status = await api.getAccessibilityStatus();
   accessibilityStatusEl.textContent = status?.trusted ? "已授权" : "未授权";
 }
@@ -349,11 +375,18 @@ audioPermissionBtn.addEventListener("click", async () => {
   }
 });
 
-api.getSettings().then(async (settings) => {
-  await refreshInstalledPlayers(settings);
-  renderSettings(settings);
-});
+Promise.all([api.getSettings(), api.getPlatformCapabilities()]).then(
+  async ([settings, capabilities]) => {
+    applyPlatformCapabilities(capabilities);
+    await refreshInstalledPlayers(settings);
+    renderSettings(settings);
+    if (platformCapabilities.systemAudioCapture) {
+      refreshAudioStatus();
+    }
+    if (platformCapabilities.accessibilityPlaybackMode) {
+      refreshAccessibilityStatus();
+    }
+  }
+);
 api.onSettingsChanged(renderSettings);
-refreshAudioStatus();
-refreshAccessibilityStatus();
 api.getUpdateStatus().then(renderUpdateStatus);

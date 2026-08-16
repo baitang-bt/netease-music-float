@@ -13,6 +13,9 @@ const {
   MUSIC_PLAYERS
 } = require("../electron/music-players");
 const { COMMANDS } = require("../electron/media-remote");
+const {
+  createWindowsMediaController
+} = require("../electron/windows-media-controller");
 
 describe("fft", () => {
   it("rejects non power-of-two lengths", () => {
@@ -121,5 +124,37 @@ describe("media commands", () => {
     assert.equal(COMMANDS.previous, 5);
     assert.equal(COMMANDS.advanceShuffle, 6);
     assert.equal(COMMANDS.advanceRepeat, 7);
+  });
+});
+
+describe("Windows media controller", () => {
+  it("normalizes a selected GSMTC session into the common track shape", async () => {
+    const updates = [];
+    const controller = createWindowsMediaController({
+      getTargetPlayerId: () => "netease",
+      onUpdate: (track) => updates.push(track),
+      sessionsApi: {
+        getAllSessions: async () => [
+          {
+            sourceAppUserModelId: "CloudMusic.exe",
+            sourceAppDisplayName: "网易云音乐",
+            title: "测试歌曲",
+            artist: "测试歌手",
+            albumTitle: "测试专辑",
+            playbackStatus: "playing",
+            timeline: { positionMs: 12000, durationMs: 180000 },
+            thumbnail: "data:image/png;base64,AA=="
+          }
+        ]
+      }
+    });
+
+    const track = await controller.fetchNowPlaying();
+    assert.equal(track.status, "matched");
+    assert.equal(track.isTarget, true);
+    assert.equal(track.playing, true);
+    assert.equal(track.elapsed, 12);
+    assert.equal(track.duration, 180);
+    assert.equal(updates.length, 1);
   });
 });

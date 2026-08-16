@@ -1,3 +1,4 @@
+const fs = require("node:fs");
 const path = require("node:path");
 const {
   app,
@@ -9,7 +10,7 @@ const {
   screen
 } = require("electron");
 const { createStateStore } = require("./state-store");
-const { createMediaRemoteController } = require("./media-remote");
+const { createPlatformMediaController } = require("./media-controller");
 const { createAudioCapture } = require("./audio-capture");
 const {
   listInstalledPlayers,
@@ -46,7 +47,7 @@ let floatWindow = null;
 let settingsWindow = null;
 let tray = null;
 let stateStore = null;
-let mediaRemote = null;
+let mediaController = null;
 let audioCapture = null;
 let dragOrigin = null;
 let floatExpanded = false;
@@ -72,6 +73,12 @@ let latestUpdateStatus = {
   state: "idle",
   message: ""
 };
+/** Renderer-facing feature availability for platform-specific settings. */
+const PLATFORM_CAPABILITIES = Object.freeze({
+  platform: process.platform,
+  systemAudioCapture: process.platform === "darwin",
+  accessibilityPlaybackMode: process.platform === "darwin"
+});
 
 /** Locks the window to the size range of the current expand state. */
 function applyFloatSizeConstraints() {
@@ -217,7 +224,10 @@ function createFloatWindow() {
 
 /** Builds the menu-bar tray entry. */
 function createTray() {
-  const icon = nativeImage.createEmpty();
+  const icon =
+    process.platform === "darwin"
+      ? nativeImage.createEmpty()
+      : resolveAppIcon();
   tray = new Tray(icon);
   tray.setTitle("♫");
   tray.setToolTip("网易云浮窗");
@@ -262,6 +272,16 @@ function createTray() {
   tray.setContextMenu(menu);
 }
 
+/** Resolves the packaged/development app icon for platforms with icon-only trays. */
+function resolveAppIcon() {
+  const candidates = [
+    path.join(process.resourcesPath || "", "icon.png"),
+    path.join(__dirname, "..", "build", "icon.png")
+  ];
+  const iconPath = candidates.find((candidate) => fs.existsSync(candidate));
+  return iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+}
+
 /** Creates a DesktopPet-style resizable settings window (framed, not float-chrome). */
 function createSettingsWindow() {
   if (settingsWindow) {
@@ -283,8 +303,12 @@ function createSettingsWindow() {
     backgroundColor: "#16161b",
     transparent: false,
     frame: true,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 14, y: 14 },
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 14, y: 14 }
+        }
+      : {}),
     resizable: true,
     movable: true,
     maximizable: true,
@@ -417,7 +441,11 @@ function applyAlwaysOnTop(alwaysOnTop) {
     return;
   }
   if (alwaysOnTop) {
-    floatWindow.setAlwaysOnTop(true, "screen-saver");
+    if (process.platform === "darwin") {
+      floatWindow.setAlwaysOnTop(true, "screen-saver");
+    } else {
+      floatWindow.setAlwaysOnTop(true);
+    }
   } else {
     floatWindow.setAlwaysOnTop(false);
   }
@@ -428,6 +456,9 @@ function applyAlwaysOnTop(alwaysOnTop) {
 /** Joins all Spaces and other apps' fullscreen windows without hiding the Dock icon. */
 function applyFullScreenVisibility() {
   if (!floatWindow || floatWindow.isDestroyed()) {
+    return;
+  }
+  if (process.platform !== "darwin") {
     return;
   }
   floatWindow.setVisibleOnAllWorkspaces(true, {
@@ -563,6 +594,15 @@ function syncAudioCapture(track) {
 
 /** Builds a snapshot of system-audio capture / permission state. */
 function getAudioPermissionStatus() {
+  if (!PLATFORM_CAPABILITIES.systemAudioCapture) {
+    return {
+      state: "unsupported",
+      running: false,
+      consent: false,
+      error: null,
+      hint: "当前平台暂不支持系统音频频谱。"
+    };
+  }
   const error = audioCapture?.getLastError?.() || null;
   const running = Boolean(audioCapture?.isRunning?.());
   const consent = Boolean(stateStore?.getSettings?.().systemAudioConsent);
@@ -589,6 +629,9 @@ function getAudioPermissionStatus() {
  * @returns {Promise<{ ok: boolean, error?: string|null, skipped?: boolean }>}
  */
 async function startAudioCaptureIfAllowed() {
+  if (!PLATFORM_CAPABILITIES.systemAudioCapture) {
+    return { ok: false, skipped: true, unsupported: true };
+  }
   if (!audioCapture || !stateStore) {
     return { ok: false, error: "not-ready" };
   }
@@ -601,6 +644,7 @@ async function startAudioCaptureIfAllowed() {
 /** Registers IPC handlers for UI controls and settings. */
 function registerIpc() {
   ipcMain.handle("settings:get", () => stateStore.getSettings());
+  ipcMain.handle("platform:get-capabilities", () => PLATFORM_CAPABILITIES);
 
   ipcMain.handle("settings:update", (_event, changes) => {
     const previousPlayerId = stateStore.getSettings().targetPlayerId;
@@ -611,7 +655,7 @@ function registerIpc() {
       launchPlaybackModeSynced = false;
       knownPlaybackMode = null;
       // Force a Now Playing refresh so the float rematches immediately.
-      mediaRemote?.fetchNowPlaying({ noArtwork: true }).then((track) => {
+      mediaController?.fetchNowPlaying({ noArtwork: true }).then((track) => {
         broadcastTrack({
           ...track,
           playbackMode:
@@ -643,6 +687,9 @@ function registerIpc() {
    * Does not restart a healthy capture (restart re-triggers macOS TCC every time).
    */
   ipcMain.handle("audio:request-permission", async () => {
+    if (!PLATFORM_CAPABILITIES.systemAudioCapture) {
+      return getAudioPermissionStatus();
+    }
     stateStore.updateSettings({ systemAudioConsent: true });
 
     let capture = { ok: false, error: null };
@@ -678,18 +725,22 @@ function registerIpc() {
 
   ipcMain.handle("media:toggle", async () => {
     // Do not await the MediaRemote round-trip — UI flips optimistically.
-    mediaRemote.togglePlayPause();
-    return { ok: true };
+    return invokeMediaCommand("togglePlayPause");
   });
-  ipcMain.handle("media:next", async () => {
-    mediaRemote.nextTrack();
-    return { ok: true };
-  });
-  ipcMain.handle("media:previous", async () => {
-    mediaRemote.previousTrack();
-    return { ok: true };
-  });
+  ipcMain.handle("media:next", async () => invokeMediaCommand("nextTrack"));
+  ipcMain.handle("media:previous", async () =>
+    invokeMediaCommand("previousTrack")
+  );
   ipcMain.handle("media:mode", async () => {
+    if (!PLATFORM_CAPABILITIES.accessibilityPlaybackMode) {
+      return {
+        ok: false,
+        mode: null,
+        error: "playback-mode-unsupported-platform",
+        accessibility: false,
+        labels: MODE_LABELS
+      };
+    }
     if (stateStore.getSettings().targetPlayerId !== "netease") {
       return {
         ok: false,
@@ -713,6 +764,9 @@ function registerIpc() {
   });
 
   ipcMain.handle("media:detect-mode", async () => {
+    if (!PLATFORM_CAPABILITIES.accessibilityPlaybackMode) {
+      return { ok: false, accessibility: false, error: "unsupported-platform" };
+    }
     const result = await detectPlaybackMode();
     if (result.mode) {
       publishPlaybackMode(result.mode);
@@ -721,6 +775,9 @@ function registerIpc() {
   });
 
   ipcMain.handle("media:set-mode", async (_event, mode) => {
+    if (!PLATFORM_CAPABILITIES.accessibilityPlaybackMode) {
+      return { ok: false, accessibility: false, error: "unsupported-platform" };
+    }
     const result = await setPlaybackMode(String(mode || ""));
     if (result.mode) {
       publishPlaybackMode(result.mode);
@@ -729,10 +786,16 @@ function registerIpc() {
   });
 
   ipcMain.handle("accessibility:status", () => ({
-    trusted: isAccessibilityTrusted(false)
+    supported: PLATFORM_CAPABILITIES.accessibilityPlaybackMode,
+    trusted:
+      PLATFORM_CAPABILITIES.accessibilityPlaybackMode &&
+      isAccessibilityTrusted(false)
   }));
 
   ipcMain.handle("accessibility:request", async () => {
+    if (!PLATFORM_CAPABILITIES.accessibilityPlaybackMode) {
+      return { trusted: false, supported: false, openedSettings: false };
+    }
     const trusted = isAccessibilityTrusted(true);
     if (!trusted) {
       await openAccessibilitySettings();
@@ -798,17 +861,29 @@ function registerIpc() {
   });
 }
 
+/**
+ * Invokes a common playback command and converts platform failures into a
+ * stable IPC result instead of an unhandled rejected promise.
+ * @param {"togglePlayPause"|"nextTrack"|"previousTrack"} command
+ */
+async function invokeMediaCommand(command) {
+  try {
+    await mediaController?.[command]?.();
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 app.whenReady().then(async () => {
   if (process.platform === "darwin") {
     app.dock.show();
-    const fs = require("node:fs");
-    const candidates = [
-      path.join(process.resourcesPath || "", "icon.png"),
-      path.join(__dirname, "..", "build", "icon.png")
-    ];
-    const iconPath = candidates.find((candidate) => fs.existsSync(candidate));
-    if (iconPath) {
-      app.dock.setIcon(iconPath);
+    const icon = resolveAppIcon();
+    if (!icon.isEmpty()) {
+      app.dock.setIcon(icon);
     }
   }
 
@@ -832,7 +907,7 @@ app.whenReady().then(async () => {
     // Ignore detection failures; MediaRemote matching still uses the saved id.
   }
 
-  mediaRemote = createMediaRemoteController({
+  mediaController = createPlatformMediaController({
     pollMs: 900,
     getTargetPlayerId: () => stateStore.getSettings().targetPlayerId,
     onUpdate: (track) => {
@@ -862,15 +937,17 @@ app.whenReady().then(async () => {
   lyricsController.start(() => latestTrack);
   // Capture all system audio once; filtering by NetEase PID required restart and
   // caused repeated「系统音频录制」prompts whenever the reported PID changed.
-  audioCapture = createAudioCapture({
-    binaryPath: resolveAudioteeBinary(),
-    onBands: (bands, meta) => broadcastSpectrum(bands, meta)
-  });
+  if (PLATFORM_CAPABILITIES.systemAudioCapture) {
+    audioCapture = createAudioCapture({
+      binaryPath: resolveAudioteeBinary(),
+      onBands: (bands, meta) => broadcastSpectrum(bands, meta)
+    });
+  }
 
   registerIpc();
   createTray();
   createFloatWindow();
-  mediaRemote.start();
+  mediaController.start();
 
   autoUpdaterController = createAutoUpdater({
     onStatus: (payload) => broadcastUpdateStatus(payload)
@@ -914,7 +991,7 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", async () => {
-  mediaRemote?.stop();
+  await mediaController?.stop();
   lyricsController?.stop();
   if (silenceTimer) {
     clearInterval(silenceTimer);

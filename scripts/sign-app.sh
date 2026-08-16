@@ -17,10 +17,12 @@ fi
 
 bash "$SCRIPT_DIR/ensure-signing-identity.sh"
 
-# Only the outer bundle is re-signed: deep re-signing rewrites the audiotee
-# helper too, which resets its own system-audio TCC record.
-codesign --force --sign "$IDENTITY_NAME" \
+# Electron's renamed helper apps/frameworks retain invalid ad-hoc seals when
+# builder signing is disabled, so re-sign nested code with the stable identity.
+# `codesign --deep` does not rewrite the standalone audiotee resource.
+codesign --force --deep --sign "$IDENTITY_NAME" \
   --preserve-metadata=entitlements \
   "$APP_PATH"
 
+codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 codesign -dv --verbose=2 "$APP_PATH" 2>&1 | grep -E 'Identifier|Authority|Signature' || true

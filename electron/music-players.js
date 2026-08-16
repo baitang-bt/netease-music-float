@@ -18,6 +18,7 @@ const MUSIC_PLAYERS = [
     namePattern: /网易云|NeteaseMusic|NetEase\s*Cloud\s*Music/i,
     appNames: ["NeteaseMusic", "NetEaseMusic", "网易云音乐"],
     appFileNames: ["NeteaseMusic.app", "NetEaseMusic.app", "网易云音乐.app"],
+    windowsUri: "orpheus://",
     supportsAxPlaybackMode: true
   },
   {
@@ -27,6 +28,7 @@ const MUSIC_PLAYERS = [
     namePattern: /^(Music|音乐|Apple\s*Music)$/i,
     appNames: ["Music", "音乐"],
     appFileNames: ["Music.app"],
+    windowsUri: "music://",
     supportsAxPlaybackMode: false
   },
   {
@@ -36,6 +38,7 @@ const MUSIC_PLAYERS = [
     namePattern: /QQ\s*音乐|QQMusic/i,
     appNames: ["QQMusic", "QQ音乐"],
     appFileNames: ["QQMusic.app", "QQ音乐.app"],
+    windowsUri: "qqmusic://",
     supportsAxPlaybackMode: false
   },
   {
@@ -45,6 +48,7 @@ const MUSIC_PLAYERS = [
     namePattern: /^Spotify$/i,
     appNames: ["Spotify"],
     appFileNames: ["Spotify.app"],
+    windowsUri: "spotify://",
     supportsAxPlaybackMode: false
   },
   {
@@ -165,6 +169,19 @@ async function isPlayerInstalled(player) {
  * @returns {Promise<{ id: string, label: string, supportsAxPlaybackMode: boolean }[]>}
  */
 async function listInstalledPlayers() {
+  if (process.platform === "win32") {
+    const startApps = await listWindowsStartApps();
+    return MUSIC_PLAYERS.filter((player) =>
+      startApps.some((entry) =>
+        player.namePattern.test(`${entry.Name || ""} ${entry.AppID || ""}`)
+      )
+    ).map((player) => ({
+      id: player.id,
+      label: player.label,
+      supportsAxPlaybackMode: false
+    }));
+  }
+
   const installed = [];
   for (const player of MUSIC_PLAYERS) {
     if (await isPlayerInstalled(player)) {
@@ -215,6 +232,10 @@ async function openOrFocusPlayer(playerId) {
     return { ok: false, method: "failed", detail: "unknown-player" };
   }
 
+  if (process.platform === "win32") {
+    return openWindowsPlayer(player);
+  }
+
   for (const root of candidateAppRoots()) {
     for (const fileName of player.appFileNames) {
       const appPath = path.join(root, fileName);
@@ -240,6 +261,76 @@ async function openOrFocusPlayer(playerId) {
       return { ok: true, method: "open-bundle", detail: bundleId };
     } catch {
       // try next bundle
+    }
+  }
+
+  return {
+    ok: false,
+    method: "failed",
+    detail: `未找到已安装的 ${player.label}`
+  };
+}
+
+/**
+ * Lists Start-menu applications once for Windows installation detection.
+ * @returns {Promise<{ Name?: string, AppID?: string }[]>}
+ */
+async function listWindowsStartApps() {
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-StartApps | Select-Object Name,AppID | ConvertTo-Json -Compress"
+      ],
+      { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }
+    );
+    const parsed = JSON.parse(stdout.trim() || "[]");
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Opens a Windows Start-menu app matching the catalog player, then falls back
+ * to its registered URI protocol.
+ * @param {typeof MUSIC_PLAYERS[number]} player
+ */
+async function openWindowsPlayer(player) {
+  const script = [
+    "$pattern=$env:NETEASE_FLOAT_PLAYER_PATTERN",
+    "$app=Get-StartApps | Where-Object { $_.Name -match $pattern -or $_.AppID -match $pattern } | Select-Object -First 1",
+    "if (-not $app) { exit 2 }",
+    "Start-Process ('shell:AppsFolder\\' + $app.AppID)"
+  ].join("; ");
+  try {
+    await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      {
+        env: {
+          ...process.env,
+          NETEASE_FLOAT_PLAYER_PATTERN: player.namePattern.source
+        },
+        timeout: 8000
+      }
+    );
+    return { ok: true, method: "windows-start-app" };
+  } catch {
+    if (player.windowsUri) {
+      try {
+        await execFileAsync(
+          "cmd.exe",
+          ["/d", "/s", "/c", "start", "", player.windowsUri],
+          { timeout: 8000 }
+        );
+        return { ok: true, method: "windows-uri", detail: player.windowsUri };
+      } catch {
+        // Report the shared not-found result below.
+      }
     }
   }
 

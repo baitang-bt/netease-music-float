@@ -138,6 +138,12 @@ button:active {
     var(--paper);
 }
 
+/* Windows uses a normal native title bar, so it does not need macOS traffic-light clearance. */
+:root[data-platform="win32"] .settings-sidebar,
+:root[data-platform="win32"] .settings-main {
+  padding-top: 18px;
+}
+
 .panel-header {
   margin-bottom: 14px;
   flex-shrink: 0;
