@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'"
+    />
+    <title>网易云浮窗</title>
+    <link rel="stylesheet" href="./vendor/material-symbols/material-symbols.css" />
+    <link rel="stylesheet" href="./float.css" />
+  </head>
+  <body>
+    <div id="app" class="float">
+      <header class="drag-region" id="drag-handle" title="拖动浮窗">
+        <div class="header-left">
+          <button type="button" id="open-app" class="icon-btn" title="打开音乐软件">
+            <span class="material-symbols-outlined">open_in_new</span>
+          </button>
+          <span id="status-pill" class="pill">等待</span>
+        </div>
+        <button type="button" id="btn-settings" class="icon-btn" title="设置">
+          <span class="material-symbols-outlined">settings</span>
+        </button>
+      </header>
+
+      <main class="body">
+        <button type="button" id="artwork-btn" class="artwork" title="打开音乐软件">
+          <img id="artwork" alt="" hidden />
+          <span id="artwork-fallback" class="artwork-fallback material-symbols-outlined">
+            music_note
+          </span>
+        </button>
+
+        <div class="meta">
+          <div id="title" class="title">未在播放</div>
+          <div id="artist" class="artist">请先在网易云音乐播放歌曲</div>
+          <canvas id="spectrum" width="200" height="44" aria-hidden="true"></canvas>
+          <p id="audio-hint" class="hint" hidden></p>
+        </div>
+      </main>
+
+      <footer class="controls">
+        <button type="button" id="btn-prev" title="上一首">
+          <span class="material-symbols-outlined">skip_previous</span>
+        </button>
+        <button type="button" id="btn-toggle" title="播放/暂停">
+          <span id="icon-toggle" class="material-symbols-outlined filled">play_arrow</span>
+        </button>
+        <button type="button" id="btn-next" title="下一首">
+          <span class="material-symbols-outlined">skip_next</span>
+        </button>
+        <button type="button" id="btn-mode" title="播放模式：顺序" data-mode="sequential">
+          <span id="icon-mode" class="material-symbols-outlined">repeat</span>
+        </button>
+      </footer>
+    </div>
+    <script src="./theme-colors.js"></script>
+    <script src="./title-fonts.js"></script>
+    <script src="./spectrum.js"></script>
+    <script src="./float.js"></script>
+  </body>
+</html>
