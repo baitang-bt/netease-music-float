@@ -334,17 +334,22 @@ else {
 
 /**
  * Sets NetEase to an absolute playback mode (menu click, else cycle button).
+ * `prompt` must stay false for background work such as the launch sync, otherwise
+ * macOS shows its Accessibility dialog without the user having asked for anything.
  * @param {string} targetMode
+ * @param {{ prompt?: boolean }} [options]
  * @returns {Promise<{ ok: boolean, mode?: string|null, error?: string, accessibility?: boolean }>}
  */
-async function setPlaybackMode(targetMode) {
+async function setPlaybackMode(targetMode, options = {}) {
+  const prompt = options.prompt !== false;
   if (!PLAYBACK_MODES.includes(targetMode)) {
     return { ok: false, error: `未知播放模式: ${targetMode}` };
   }
 
-  const prompted = isAccessibilityTrusted(true);
-  if (!prompted) {
-    await openAccessibilitySettings();
+  if (!isAccessibilityTrusted(prompt)) {
+    if (prompt) {
+      await openAccessibilitySettings();
+    }
     return {
       ok: false,
       accessibility: false,

@@ -6,6 +6,8 @@ const spectrum = window.createSpectrumRenderer(
 
 const els = {
   title: document.querySelector("#title"),
+  titleText: document.querySelector("#title-text"),
+  titleTranslation: document.querySelector("#title-translation"),
   artist: document.querySelector("#artist"),
   artwork: document.querySelector("#artwork"),
   artworkFallback: document.querySelector("#artwork-fallback"),
@@ -24,6 +26,10 @@ let dragStartX = 0;
 let dragStartY = 0;
 let expanded = false;
 let collapseTimer = null;
+/** Runs while the expanded chrome fades out, before the window shrinks. */
+let collapseFadeTimer = null;
+/** Latest settings, replayed when expand state changes the effective theme. */
+let lastSettings = null;
 /** Optimistic play state until the next MediaRemote snapshot arrives. */
 let optimisticPlaying = null;
 /** Last non-lyric title text for the collapsed/expanded title slot. */
@@ -32,19 +38,50 @@ let trackTitleText = "未在播放";
 let showingLyric = false;
 
 const DRAG_THRESHOLD_PX = 5;
+/** Keep in sync with the chrome transition in float.css. */
+const CHROME_FADE_MS = 130;
+
+/** Switches to the collapsed layout and shrinks the native window. */
+function commitCollapse() {
+  collapseFadeTimer = null;
+  appRoot.classList.remove("is-leaving");
+  appRoot.classList.add("is-collapsed");
+  // Transparent mode only applies while collapsed, so the theme is recomputed.
+  if (lastSettings) {
+    applyTheme(lastSettings);
+  }
+  api.setExpanded(false);
+}
 
 /**
  * Expands or collapses the float chrome and native window height.
+ * Collapsing fades the expanded chrome out at full size first, so the window
+ * never shrinks out from under visible controls.
  * @param {boolean} nextExpanded
  */
 function setExpanded(nextExpanded) {
   const shouldExpand = Boolean(nextExpanded);
-  if (expanded === shouldExpand) {
+  if (expanded === shouldExpand && !collapseFadeTimer) {
     return;
   }
   expanded = shouldExpand;
-  appRoot.classList.toggle("is-collapsed", !expanded);
-  api.setExpanded(expanded);
+
+  if (expanded) {
+    if (collapseFadeTimer) {
+      clearTimeout(collapseFadeTimer);
+      collapseFadeTimer = null;
+    }
+    appRoot.classList.remove("is-leaving");
+    appRoot.classList.remove("is-collapsed");
+    if (lastSettings) {
+      applyTheme(lastSettings);
+    }
+    api.setExpanded(true);
+    return;
+  }
+
+  appRoot.classList.add("is-leaving");
+  collapseFadeTimer = setTimeout(commitCollapse, CHROME_FADE_MS);
 }
 
 /** Cancels a pending leave-to-collapse timer. */
@@ -155,6 +192,27 @@ function setupDrag() {
 }
 
 /**
+ * Shows or hides the translated lyric layered behind the original line.
+ * @param {string|null|undefined} translation
+ */
+function setTitleTranslation(translation) {
+  const text = typeof translation === "string" ? translation.trim() : "";
+  els.titleTranslation.textContent = text;
+  els.titleTranslation.hidden = !text;
+  els.title.classList.toggle("has-translation", Boolean(text));
+}
+
+/**
+ * Writes plain (non-lyric) text into the title slot and drops any translation.
+ * @param {string} text
+ */
+function showTitleText(text) {
+  els.titleText.textContent = text;
+  els.title.classList.remove("is-lyric");
+  setTitleTranslation("");
+}
+
+/**
  * Applies a Now Playing snapshot to the float UI.
  * @param {object} track
  */
@@ -174,8 +232,7 @@ function renderTrack(track) {
   if (!track || track.status === "empty") {
     trackTitleText = "未在播放";
     showingLyric = false;
-    els.title.textContent = trackTitleText;
-    els.title.classList.remove("is-lyric");
+    showTitleText(trackTitleText);
     els.artist.textContent = `请先在${targetLabel}播放歌曲`;
     els.statusPill.textContent = "空闲";
     els.statusPill.className = "pill";
@@ -187,8 +244,7 @@ function renderTrack(track) {
   if (track.status === "error") {
     trackTitleText = "媒体状态不可用";
     showingLyric = false;
-    els.title.textContent = trackTitleText;
-    els.title.classList.remove("is-lyric");
+    showTitleText(trackTitleText);
     els.artist.textContent = track.error || "MediaRemote 读取失败";
     els.statusPill.textContent = "错误";
     els.statusPill.className = "pill is-warn";
@@ -199,8 +255,7 @@ function renderTrack(track) {
   if (!track.isTarget) {
     trackTitleText = track.title || "其它播放器";
     showingLyric = false;
-    els.title.textContent = trackTitleText;
-    els.title.classList.remove("is-lyric");
+    showTitleText(trackTitleText);
     els.artist.textContent = `当前 Now Playing 不是${targetLabel}`;
     els.statusPill.textContent = "未匹配";
     els.statusPill.className = "pill is-warn";
@@ -210,8 +265,7 @@ function renderTrack(track) {
 
   trackTitleText = track.title || "未知曲目";
   if (!showingLyric) {
-    els.title.textContent = trackTitleText;
-    els.title.classList.remove("is-lyric");
+    showTitleText(trackTitleText);
   }
   els.artist.textContent = [track.artist, track.album].filter(Boolean).join(" · ");
   const playing =
@@ -373,19 +427,24 @@ setupClickExpand();
 setupDrag();
 setupControls();
 /**
- * Shows a timed lyric in the title slot, or restores the song title.
- * @param {{ line?: string, showLyric?: boolean, instrumental?: boolean }} payload
+ * Shows a timed lyric (with its translation layered behind) or the song title.
+ * @param {{
+ *   line?: string,
+ *   translation?: string,
+ *   showLyric?: boolean,
+ *   instrumental?: boolean
+ * }} payload
  */
 function renderLyric(payload) {
   if (payload?.showLyric && payload.line) {
     showingLyric = true;
-    els.title.textContent = payload.line;
+    els.titleText.textContent = payload.line;
     els.title.classList.add("is-lyric");
+    setTitleTranslation(payload.translation);
     return;
   }
   showingLyric = false;
-  els.title.textContent = trackTitleText;
-  els.title.classList.remove("is-lyric");
+  showTitleText(trackTitleText);
 }
 
 api.onTrack(renderTrack);
@@ -408,6 +467,8 @@ api.getTrack().then(renderTrack);
 
 /**
  * Applies window + spectrum colors, transparent mode, and title typography.
+ * Transparent styling is limited to the collapsed float: once expanded the panel
+ * looks exactly like the opaque mode, so the spectrum follows the same rule.
  * @param {{
  *   windowColor?: string,
  *   spectrumColor?: string,
@@ -417,11 +478,13 @@ api.getTrack().then(renderTrack);
  * }} settings
  */
 function applyTheme(settings) {
+  lastSettings = settings;
   const windowColor =
     window.normalizeHexColor(settings?.windowColor) || "#24242a";
   const spectrumColor =
     window.normalizeHexColor(settings?.spectrumColor) || "#e60026";
-  const transparent = Boolean(settings?.transparentFloat);
+  const transparentSetting = Boolean(settings?.transparentFloat);
+  const transparent = transparentSetting && !expanded;
   const contrast = window.contrastTheme(windowColor);
   const visibleSpectrumColor = transparent
     ? spectrumColor
@@ -440,6 +503,12 @@ function applyTheme(settings) {
   root.style.setProperty("--muted", contrast.muted);
   root.style.setProperty("--title-color", contrast.title);
   root.style.setProperty("--lyric-color", contrast.lyric);
+  root.style.setProperty(
+    "--lyric-translation-color",
+    contrast.lyricTranslation
+  );
+  // Halo painted in the panel color so the top line stays legible on overlap.
+  root.style.setProperty("--title-halo", window.hexToRgba(bottom, 0.92));
   root.style.setProperty("--line", contrast.line);
   root.style.setProperty("--surface", contrast.surface);
   root.style.setProperty("--surface-hover", contrast.surfaceHover);
@@ -450,18 +519,20 @@ function applyTheme(settings) {
   );
   root.style.setProperty("--title-font", window.resolveTitleFontStack(fontId));
   root.style.setProperty("--title-font-size", `${fontSize}px`);
-  appRoot.classList.toggle("is-transparent", transparent);
+  appRoot.classList.toggle("is-transparent", transparentSetting);
   appRoot.classList.toggle("is-light-theme", contrast.isLight);
+  spectrum.setMirrored(transparent);
   spectrum.setColors({
+    // Clear float: bars sit behind the lyric, so they stay a shade softer.
     bottom: window.hexToRgba(
       visibleSpectrumColor,
-      transparent ? 0.4 : 0.36
+      transparent ? 0.32 : 0.36
     ),
     top: window.hexToRgba(
       contrast.isLight && !transparent
         ? visibleSpectrumColor
         : window.lightenHex(visibleSpectrumColor, 0.48),
-      transparent ? 0.88 : 0.78
+      transparent ? 0.8 : 0.78
     )
   });
 }

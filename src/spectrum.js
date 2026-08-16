@@ -1,3 +1,6 @@
+/** Bands below this level read as silence and are not painted. */
+const SILENT_BAND = 0.05;
+
 /**
  * Draws real-time spectrum bars onto a canvas.
  * Targets update from IPC; paint runs on rAF so motion stays display-synced.
@@ -12,6 +15,8 @@ function createSpectrumRenderer(canvas) {
   let rafId = 0;
   let colorBottom = "rgba(230, 0, 38, 0.28)";
   let colorTop = "rgba(255, 180, 190, 0.78)";
+  /** Mirrored bars grow up and down from a center line (transparent float). */
+  let mirrored = false;
 
   /**
    * Matches the drawing buffer to the visible CSS box (HiDPI-aware).
@@ -30,27 +35,86 @@ function createSpectrumRenderer(canvas) {
     return true;
   }
 
+  /**
+   * Geometry shared by both bar layouts.
+   * @param {number} width
+   */
+  function barMetrics(width) {
+    const gap = Math.max(1, Math.round(width / 220));
+    return {
+      gap,
+      barWidth: (width - gap * (bandCount - 1)) / bandCount
+    };
+  }
+
+  /**
+   * Paints bars rising from the bottom edge (panel float).
+   * @param {number} width
+   * @param {number} height
+   */
+  function drawGroundedBars(width, height) {
+    const { gap, barWidth } = barMetrics(width);
+    // Keep bars slightly translucent so the title behind stays readable.
+    const gradient = ctx.createLinearGradient(0, height, 0, 0);
+    gradient.addColorStop(0, colorBottom);
+    gradient.addColorStop(1, colorTop);
+    ctx.fillStyle = gradient;
+    for (let i = 0; i < bandCount; i += 1) {
+      const value = Math.max(0.02, Math.min(1, display[i] || 0));
+      const barHeight = Math.max(2, value * (height - 2));
+      const x = i * (barWidth + gap);
+      ctx.fillRect(x, height - barHeight, Math.max(1, barWidth), barHeight);
+    }
+  }
+
+  /**
+   * Paints bars extending symmetrically above and below the center line.
+   * Silent bands are skipped instead of drawn as 1px stubs: on the clear float
+   * those stubs formed a dashed line straight through the lyric.
+   * @param {number} width
+   * @param {number} height
+   */
+  function drawMirroredBars(width, height) {
+    const { gap, barWidth } = barMetrics(width);
+    const center = height / 2;
+    const maxHalf = Math.max(1, center - 1);
+    const bar = Math.max(1, barWidth);
+
+    for (let i = 0; i < bandCount; i += 1) {
+      const value = Math.min(1, display[i] || 0);
+      if (value < SILENT_BAND) {
+        continue;
+      }
+      const half = Math.max(bar * 0.5, value * maxHalf);
+      const x = i * (barWidth + gap);
+      const gradient = ctx.createLinearGradient(0, center - half, 0, center + half);
+      gradient.addColorStop(0, colorBottom);
+      gradient.addColorStop(0.5, colorTop);
+      gradient.addColorStop(1, colorBottom);
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.roundRect(
+        x,
+        center - half,
+        bar,
+        half * 2,
+        Math.min(bar * 0.5, half)
+      );
+      ctx.fill();
+    }
+  }
+
   /** Clears and paints the current display band heights. */
   function draw() {
     syncCanvasSize();
     const width = canvas.width;
     const height = canvas.height;
     ctx.clearRect(0, 0, width, height);
-
-    const gap = Math.max(1, Math.round(width / 220));
-    const barWidth = (width - gap * (bandCount - 1)) / bandCount;
-    for (let i = 0; i < bandCount; i += 1) {
-      const value = Math.max(0.02, Math.min(1, display[i] || 0));
-      const barHeight = Math.max(2, value * (height - 2));
-      const x = i * (barWidth + gap);
-      const y = height - barHeight;
-      // Keep bars slightly translucent so the title behind stays readable.
-      const gradient = ctx.createLinearGradient(0, height, 0, 0);
-      gradient.addColorStop(0, colorBottom);
-      gradient.addColorStop(1, colorTop);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x, y, Math.max(1, barWidth), barHeight);
+    if (mirrored) {
+      drawMirroredBars(width, height);
+      return;
     }
+    drawGroundedBars(width, height);
   }
 
   /**
@@ -119,6 +183,19 @@ function createSpectrumRenderer(canvas) {
     draw();
   }
 
+  /**
+   * Switches between bottom-anchored and center-mirrored bars.
+   * @param {boolean} nextMirrored
+   */
+  function setMirrored(nextMirrored) {
+    const value = Boolean(nextMirrored);
+    if (mirrored === value) {
+      return;
+    }
+    mirrored = value;
+    draw();
+  }
+
   if (typeof ResizeObserver !== "undefined") {
     const observer = new ResizeObserver(() => {
       if (syncCanvasSize()) {
@@ -129,7 +206,7 @@ function createSpectrumRenderer(canvas) {
   }
 
   draw();
-  return { setBands, setColors, draw };
+  return { setBands, setColors, setMirrored, draw };
 }
 
 window.createSpectrumRenderer = createSpectrumRenderer;

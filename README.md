@@ -2,7 +2,7 @@
 
 macOS 透明置顶浮窗：跟随本机音乐软件的系统 Now Playing（网易云 / 苹果音乐 / QQ 音乐等），提供播放控制与真实声浪频谱。不替代音乐客户端，不要求再次登录。
 
-仓库：[baitang-bt/netease-music-float](https://github.com/baitang-bt/-)
+仓库：[baitang-bt/netease-music-float](https://github.com/baitang-bt/netease-music-float)
 
 ## 要求
 

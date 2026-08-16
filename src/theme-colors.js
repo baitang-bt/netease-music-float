@@ -121,6 +121,8 @@ function contrastTheme(backgroundHex) {
         muted: "rgba(23, 23, 27, 0.62)",
         title: "rgba(23, 23, 27, 0.58)",
         lyric: "rgba(23, 23, 27, 0.86)",
+        // Readable but clearly secondary next to the original lyric line.
+        lyricTranslation: "rgba(23, 23, 27, 0.42)",
         line: "rgba(0, 0, 0, 0.13)",
         surface: "rgba(0, 0, 0, 0.055)",
         surfaceHover: "rgba(0, 0, 0, 0.1)",
@@ -132,6 +134,7 @@ function contrastTheme(backgroundHex) {
         muted: "rgba(244, 241, 236, 0.62)",
         title: "rgba(244, 241, 236, 0.48)",
         lyric: "rgba(244, 241, 236, 0.82)",
+        lyricTranslation: "rgba(244, 241, 236, 0.46)",
         line: "rgba(255, 255, 255, 0.1)",
         surface: "rgba(255, 255, 255, 0.055)",
         surfaceHover: "rgba(255, 255, 255, 0.11)",

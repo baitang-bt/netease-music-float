@@ -7,7 +7,6 @@ const windowColorInput = document.querySelector("#window-color");
 const spectrumColorInput = document.querySelector("#spectrum-color");
 const transparentFloatInput = document.querySelector("#transparent-float");
 const titleFontSelect = document.querySelector("#title-font");
-const titleFontHint = document.querySelector("#title-font-hint");
 const titleFontSizeInput = document.querySelector("#title-font-size");
 const titleFontSizeLabel = document.querySelector("#title-font-size-label");
 const titleFontPreview = document.querySelector("#title-font-preview");
@@ -79,12 +78,10 @@ function updatePlayerDependentUi(playerId) {
  */
 function renderUpdateStatus(status) {
   const version = status?.currentVersion
-    ? `当前版本 ${status.currentVersion}`
+    ? `v${status.currentVersion}`
     : "";
   const message = status?.message || "尚未检查";
-  updateStatusEl.textContent = version
-    ? `更新：${message}（${version}）`
-    : `更新：${message}`;
+  updateStatusEl.textContent = version ? `${message}（${version}）` : message;
   installUpdateBtn.hidden = status?.state !== "ready";
 }
 
@@ -99,9 +96,7 @@ async function refreshInstalledPlayers(settings) {
 /** Refreshes Accessibility trust status for playback-mode control. */
 async function refreshAccessibilityStatus() {
   const status = await api.getAccessibilityStatus();
-  accessibilityStatusEl.textContent = status?.trusted
-    ? "辅助功能：已授权（可切换网易云播放模式）"
-    : "辅助功能：未授权（播放模式按钮无法控制网易云）";
+  accessibilityStatusEl.textContent = status?.trusted ? "已授权" : "未授权";
 }
 
 /** Fills the title-font <select> from shared CJK-capable presets. */
@@ -122,11 +117,6 @@ function populateTitleFontOptions() {
  * @param {number} fontSize
  */
 function renderTitleFontPreview(fontId, fontSize) {
-  const preset =
-    (window.TITLE_FONT_PRESETS && window.TITLE_FONT_PRESETS[fontId]) ||
-    (window.TITLE_FONT_PRESETS &&
-      window.TITLE_FONT_PRESETS[window.DEFAULT_TITLE_FONT_ID]);
-  titleFontHint.textContent = preset?.hint || "";
   titleFontSizeLabel.textContent = `${fontSize}px`;
   titleFontPreview.style.fontFamily = window.resolveTitleFontStack(fontId);
   titleFontPreview.style.fontSize = `${fontSize}px`;
@@ -162,7 +152,6 @@ function applySettingsTheme(settings) {
   root.style.setProperty("--ink-soft", contrast.muted);
   root.style.setProperty("--paper", paper);
   root.style.setProperty("--sidebar", sidebar);
-  root.style.setProperty("--card", contrast.surface);
   root.style.setProperty("--surface", contrast.surface);
   root.style.setProperty("--surface-hover", contrast.surfaceHover);
   root.style.setProperty("--line", contrast.line);

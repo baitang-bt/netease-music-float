@@ -93,26 +93,36 @@ function isMetaLyricLine(text) {
 }
 
 /**
- * Picks the active lyric line for a playback position (seconds).
- * @param {{ time: number, text: string }[]} lines
+ * Picks the active lyric entry (text + translation) for a playback position.
+ * @param {{ time: number, text: string, translation?: string }[]} lines
  * @param {number} elapsedSec
+ * @returns {{ time: number, text: string, translation?: string }|null}
  */
-function lyricLineAt(lines, elapsedSec) {
+function lyricEntryAt(lines, elapsedSec) {
   if (!lines.length) {
-    return "";
+    return null;
   }
   const t = Math.max(0, Number(elapsedSec) || 0);
-  let current = "";
+  let current = null;
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i].time <= t + 0.05) {
       if (lines[i].text) {
-        current = lines[i].text;
+        current = lines[i];
       }
     } else {
       break;
     }
   }
   return current;
+}
+
+/**
+ * Picks the active lyric text for a playback position (seconds).
+ * @param {{ time: number, text: string }[]} lines
+ * @param {number} elapsedSec
+ */
+function lyricLineAt(lines, elapsedSec) {
+  return lyricEntryAt(lines, elapsedSec)?.text || "";
 }
 
 /**
@@ -177,7 +187,37 @@ async function searchSongId(title, artist) {
 }
 
 /**
- * Fetches and normalizes lyrics for a NetEase song id.
+ * Pairs each lyric line with the translated line sharing its timestamp.
+ * Timestamps may drift slightly between the two LRCs, so nearby lines match.
+ * @param {{ time: number, text: string }[]} lines
+ * @param {{ time: number, text: string }[]} translationLines
+ * @returns {{ time: number, text: string, translation: string }[]}
+ */
+function attachTranslations(lines, translationLines) {
+  if (!Array.isArray(translationLines) || !translationLines.length) {
+    return lines.map((line) => ({ ...line, translation: "" }));
+  }
+  const TOLERANCE_SEC = 0.4;
+  return lines.map((line) => {
+    let best = null;
+    let bestDelta = Infinity;
+    for (const candidate of translationLines) {
+      const delta = Math.abs(candidate.time - line.time);
+      if (delta < bestDelta) {
+        best = candidate;
+        bestDelta = delta;
+      }
+    }
+    const translation =
+      best && bestDelta <= TOLERANCE_SEC && best.text !== line.text
+        ? best.text
+        : "";
+    return { ...line, translation };
+  });
+}
+
+/**
+ * Fetches and normalizes lyrics (plus translation) for a NetEase song id.
  * @param {number} songId
  */
 async function fetchLyricPayload(songId) {
@@ -185,8 +225,12 @@ async function fetchLyricPayload(songId) {
     `/api/song/lyric?id=${encodeURIComponent(String(songId))}&lv=1&kv=1&tv=-1`
   );
   const lrcText = data?.lrc?.lyric || "";
+  const translationText = data?.tlyric?.lyric || "";
   const lines = parseLrc(lrcText);
   const vocalLines = lines.filter((line) => !isMetaLyricLine(line.text));
+  const translationLines = parseLrc(translationText).filter(
+    (line) => line.text && !isMetaLyricLine(line.text)
+  );
   const blob = vocalLines.map((l) => l.text).join("\n");
   const instrumental = Boolean(
     data?.nolyric ||
@@ -197,7 +241,8 @@ async function fetchLyricPayload(songId) {
   return {
     songId,
     instrumental,
-    lines: instrumental ? [] : vocalLines,
+    lines: instrumental ? [] : attachTranslations(vocalLines, translationLines),
+    hasTranslation: !instrumental && translationLines.length > 0,
     raw: lrcText
   };
 }
@@ -224,6 +269,7 @@ async function loadLyricsForTrack(track) {
  * @param {{
  *   onLyric: (payload: {
  *     line: string,
+ *     translation: string,
  *     instrumental: boolean,
  *     songId: number|null,
  *     showLyric: boolean
@@ -238,6 +284,7 @@ function createLyricsController(options) {
   let lastEmitted = "";
   let lastPayload = {
     line: "",
+    translation: "",
     instrumental: false,
     songId: null,
     showLyric: false
@@ -245,11 +292,17 @@ function createLyricsController(options) {
 
   /**
    * Remembers and forwards a lyric payload, skipping unchanged repeats.
-   * @param {{ line: string, instrumental: boolean, songId: number|null, showLyric: boolean }} payload
+   * @param {{
+   *   line: string,
+   *   translation: string,
+   *   instrumental: boolean,
+   *   songId: number|null,
+   *   showLyric: boolean
+   * }} payload
    */
   function emit(payload) {
     lastPayload = payload;
-    const fingerprint = `${payload.showLyric}|${payload.line}|${payload.instrumental}`;
+    const fingerprint = `${payload.showLyric}|${payload.line}|${payload.translation}|${payload.instrumental}`;
     if (fingerprint === lastEmitted) {
       return;
     }
@@ -271,9 +324,11 @@ function createLyricsController(options) {
         cache.lines?.length
     );
     const elapsed = estimateElapsed(track);
-    const line = showLyric ? lyricLineAt(cache.lines, elapsed) : "";
+    const entry = showLyric ? lyricEntryAt(cache.lines, elapsed) : null;
+    const line = entry?.text || "";
     emit({
       line,
+      translation: line ? entry?.translation || "" : "",
       instrumental,
       songId: cache?.songId || null,
       showLyric: showLyric && Boolean(line)
@@ -291,6 +346,7 @@ function createLyricsController(options) {
       lastEmitted = "";
       emit({
         line: "",
+        translation: "",
         instrumental: false,
         songId: null,
         showLyric: false
@@ -320,6 +376,7 @@ function createLyricsController(options) {
       cache = null;
       emit({
         line: "",
+        translation: "",
         instrumental: false,
         songId: null,
         showLyric: false
@@ -393,6 +450,8 @@ function estimateElapsed(track) {
 module.exports = {
   parseLrc,
   lyricLineAt,
+  lyricEntryAt,
+  attachTranslations,
   isMetaLyricLine,
   searchSongId,
   fetchLyricPayload,

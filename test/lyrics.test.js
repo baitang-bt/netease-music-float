@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const {
   parseLrc,
   lyricLineAt,
+  lyricEntryAt,
+  attachTranslations,
   isMetaLyricLine,
   createLyricsController
 } = require("../electron/netease-lyrics");
@@ -30,6 +32,22 @@ describe("lyrics", () => {
     assert.equal(isMetaLyricLine("今天我 寒夜里看雪飘过"), false);
   });
 
+  it("pairs translated lines with the original by timestamp", () => {
+    const lines = parseLrc("[00:10.00]Hello world\n[00:20.00]Goodbye\n");
+    const translated = parseLrc("[00:10.05]你好世界\n[00:20.00]再见\n");
+    const merged = attachTranslations(lines, translated);
+    assert.equal(merged[0].translation, "你好世界");
+    assert.equal(merged[1].translation, "再见");
+    assert.equal(lyricEntryAt(merged, 12).translation, "你好世界");
+  });
+
+  it("leaves translation empty when timestamps do not line up", () => {
+    const lines = parseLrc("[00:10.00]Hello\n");
+    const translated = parseLrc("[00:40.00]毫无关系\n");
+    assert.equal(attachTranslations(lines, translated)[0].translation, "");
+    assert.equal(attachTranslations(lines, [])[0].translation, "");
+  });
+
   it("resyncs the current line for a renderer that just loaded", () => {
     const emitted = [];
     const controller = createLyricsController({
@@ -40,6 +58,7 @@ describe("lyrics", () => {
     assert.equal(emitted[0].showLyric, false);
     assert.deepEqual(controller.getLastPayload(), {
       line: "",
+      translation: "",
       instrumental: false,
       songId: null,
       showLyric: false

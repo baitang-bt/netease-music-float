@@ -6,7 +6,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'"
     />
-    <title>网易云浮窗设置</title>
+    <title>设置</title>
     <link rel="stylesheet" href="./vendor/material-symbols/material-symbols.css" />
     <link rel="stylesheet" href="./settings.css" />
   </head>
@@ -14,8 +14,7 @@
     <div class="settings-shell">
       <aside class="settings-sidebar" aria-label="设置">
         <header class="sidebar-brand">
-          <strong>网易云浮窗</strong>
-          <span class="sidebar-version">设置</span>
+          <strong>设置</strong>
         </header>
         <nav class="sidebar-nav">
           <button class="nav-item is-active" type="button">常规</button>
@@ -28,7 +27,6 @@
       <main class="settings-main">
         <header class="panel-header">
           <h1>常规</h1>
-          <p>窗口行为、外观与系统音频采集</p>
         </header>
 
         <div class="card-grid">
@@ -37,7 +35,6 @@
             <label class="setting-row">
               <span class="setting-text">
                 <strong>始终置顶</strong>
-                <small>保持浮窗在其他窗口上方</small>
               </span>
               <input id="always-on-top" type="checkbox" />
             </label>
@@ -48,11 +45,10 @@
             <label class="setting-row">
               <span class="setting-text">
                 <strong>启动时检查更新</strong>
-                <small>打包版会从 GitHub Releases 静默检查</small>
               </span>
               <input id="auto-check-updates" type="checkbox" />
             </label>
-            <p id="update-status" class="card-hint">更新：—</p>
+            <p id="update-status" class="card-hint">—</p>
             <div class="permission-head">
               <button type="button" id="btn-check-update" class="secondary-button">
                 <span class="material-symbols-outlined">system_update</span>
@@ -67,13 +63,9 @@
 
           <article class="card">
             <h2 class="card-title">音乐软件</h2>
-            <p class="card-hint">
-              浮窗只跟随下方所选应用的系统 Now Playing。选项仅列出本机已安装的软件。
-            </p>
             <label class="setting-row setting-row-stack">
               <span class="setting-text">
                 <strong>跟随播放器</strong>
-                <small>切换后立即按新目标匹配曲目与控制</small>
               </span>
               <select id="target-player" class="setting-select"></select>
             </label>
@@ -85,16 +77,12 @@
 
           <article class="card" id="playback-mode-card">
             <h2 class="card-title">播放模式</h2>
-            <p class="card-hint">
-              网易云不通过系统 MediaRemote 暴露循环/随机。浮窗用「辅助功能」点击网易云界面来真正切换；开机时可自动检测并同步。
-            </p>
             <label class="setting-row setting-row-stack">
               <span class="setting-text">
                 <strong>开机自动切换</strong>
-                <small>检测到网易云后应用该模式（「保持现状」则只读取显示）</small>
               </span>
               <select id="launch-playback-mode" class="setting-select">
-                <option value="keep">保持现状（仅检测）</option>
+                <option value="keep">保持现状</option>
                 <option value="sequential">顺序播放</option>
                 <option value="all">列表循环</option>
                 <option value="one">单曲循环</option>
@@ -105,7 +93,7 @@
               <span class="material-symbols-outlined">accessibility_new</span>
               授权辅助功能
             </button>
-            <p id="accessibility-status" class="card-hint">辅助功能：检查中…</p>
+            <p id="accessibility-status" class="card-hint">检查中…</p>
           </article>
 
           <article class="card">
@@ -113,28 +101,24 @@
             <label class="setting-row">
               <span class="setting-text">
                 <strong>透明小窗</strong>
-                <small>无底色；折叠时只显示标题与声浪（隐藏曲绘）</small>
               </span>
               <input id="transparent-float" type="checkbox" />
             </label>
             <label class="setting-row">
               <span class="setting-text">
                 <strong>小窗颜色</strong>
-                <small>浮窗玻璃底色（透明模式下不生效）</small>
               </span>
               <input id="window-color" type="color" value="#24242a" />
             </label>
             <label class="setting-row">
               <span class="setting-text">
                 <strong>声浪颜色</strong>
-                <small>频谱柱与强调色</small>
               </span>
               <input id="spectrum-color" type="color" value="#e60026" />
             </label>
             <label class="setting-row setting-row-stack">
               <span class="setting-text">
                 <strong>标题字体</strong>
-                <small id="title-font-hint">苹方 / 冬青黑体，中英日通用</small>
               </span>
               <select id="title-font" class="setting-select"></select>
             </label>
@@ -173,13 +157,6 @@
               <span class="material-symbols-outlined">shield_lock</span>
               请求录音权限
             </button>
-          </article>
-
-          <article class="card">
-            <h2 class="card-title">快捷操作</h2>
-            <p class="card-hint">
-              授权后若仍无频谱，请确认所选音乐软件正在播放，并在系统设置「仅系统音频录制」中勾选本应用。
-            </p>
           </article>
         </div>
       </main>

@@ -36,6 +36,8 @@ const FLOAT_MIN_WIDTH = 260;
 const FLOAT_MAX_WIDTH = 560;
 const FLOAT_MIN_EXPANDED_HEIGHT = 180;
 const FLOAT_MAX_EXPANDED_HEIGHT = 480;
+/** Matches the AppKit frame animation so size limits are restored after it. */
+const FLOAT_RESIZE_ANIMATION_MS = 260;
 const SETTINGS_SIZE = { width: 500, height: 640 };
 const SETTINGS_MIN_SIZE = { width: 440, height: 560 };
 const SETTINGS_MAX_SIZE = { width: 900, height: 900 };
@@ -48,6 +50,8 @@ let mediaRemote = null;
 let audioCapture = null;
 let dragOrigin = null;
 let floatExpanded = false;
+/** Pending restore of the size limits relaxed for the resize animation. */
+let floatConstraintTimer = null;
 let floatWidth = FLOAT_WIDTH_DEFAULT;
 let floatExpandedHeight = FLOAT_HEIGHT_EXPANDED_DEFAULT;
 let latestTrack = {
@@ -69,18 +73,11 @@ let latestUpdateStatus = {
   message: ""
 };
 
-/**
- * Resizes the float window between collapsed and expanded heights.
- * Keeps the top-left corner fixed so the panel grows downward.
- * @param {boolean} expanded
- */
-function setFloatExpanded(expanded) {
+/** Locks the window to the size range of the current expand state. */
+function applyFloatSizeConstraints() {
   if (!floatWindow || floatWindow.isDestroyed()) {
     return;
   }
-  floatExpanded = Boolean(expanded);
-  const bounds = floatWindow.getBounds();
-  const height = floatExpanded ? floatExpandedHeight : FLOAT_HEIGHT_COLLAPSED;
   floatWindow.setResizable(floatExpanded);
   floatWindow.setMinimumSize(
     FLOAT_MIN_WIDTH,
@@ -90,6 +87,27 @@ function setFloatExpanded(expanded) {
     FLOAT_MAX_WIDTH,
     floatExpanded ? FLOAT_MAX_EXPANDED_HEIGHT : FLOAT_HEIGHT_COLLAPSED
   );
+}
+
+/**
+ * Resizes the float window between collapsed and expanded heights.
+ * Keeps the top-left corner fixed so the panel grows downward, and animates the
+ * frame so the native window follows the renderer transition.
+ * @param {boolean} expanded
+ */
+function setFloatExpanded(expanded) {
+  if (!floatWindow || floatWindow.isDestroyed()) {
+    return;
+  }
+  floatExpanded = Boolean(expanded);
+  const bounds = floatWindow.getBounds();
+  const height = floatExpanded ? floatExpandedHeight : FLOAT_HEIGHT_COLLAPSED;
+
+  // Constraints stay wide open until the animation lands: a min/max that already
+  // matches the target height makes macOS snap to it instead of animating.
+  floatWindow.setResizable(true);
+  floatWindow.setMinimumSize(FLOAT_MIN_WIDTH, FLOAT_HEIGHT_COLLAPSED);
+  floatWindow.setMaximumSize(FLOAT_MAX_WIDTH, FLOAT_MAX_EXPANDED_HEIGHT);
   floatWindow.setBounds(
     {
       x: bounds.x,
@@ -97,7 +115,13 @@ function setFloatExpanded(expanded) {
       width: floatWidth,
       height
     },
-    false
+    true
+  );
+
+  clearTimeout(floatConstraintTimer);
+  floatConstraintTimer = setTimeout(
+    applyFloatSizeConstraints,
+    FLOAT_RESIZE_ANIMATION_MS
   );
 }
 
@@ -461,7 +485,7 @@ async function syncLaunchPlaybackMode() {
   }
 
   if (preferred && preferred !== "keep") {
-    const setResult = await setPlaybackMode(preferred);
+    const setResult = await setPlaybackMode(preferred, { prompt: false });
     if (setResult.mode) {
       publishPlaybackMode(setResult.mode);
     } else if (setResult.error && floatWindow && !floatWindow.isDestroyed()) {
