@@ -345,9 +345,9 @@ async function openWindowsPlayer(player) {
 }
 
 /**
- * True when a `ps` command path belongs to the given catalog player's app bundle
- * or main executable (Helpers under the same .app are included so audio from
- * helper processes is not dropped by an includeProcesses filter).
+ * True when a `ps` command path is the catalog player's main MacOS executable.
+ * Helper / GPU / Renderer processes under the same .app are excluded: AudioTee's
+ * includeProcesses tap crashes when those helper PIDs are listed.
  * @param {string} command
  * @param {typeof MUSIC_PLAYERS[number]} player
  */
@@ -355,15 +355,24 @@ function commandMatchesPlayer(command, player) {
   if (!command || !player) {
     return false;
   }
+  const normalized = String(command);
+  // Electron-style helpers share the app name but are not valid Core Audio taps.
+  if (/\bHelper(\s|\(|$)/i.test(normalized) || /\/Frameworks\//i.test(normalized)) {
+    return false;
+  }
   for (const fileName of player.appFileNames) {
-    if (command.includes(`/${fileName}/`) || command.includes(`/${fileName} `)) {
+    const base = fileName.replace(/\.app$/i, "");
+    if (
+      normalized.includes(`/${fileName}/Contents/MacOS/${base}`) ||
+      normalized.endsWith(`/${fileName}/Contents/MacOS/${base}`)
+    ) {
       return true;
     }
   }
   for (const name of player.appNames) {
     if (
-      command.endsWith(`/${name}`) ||
-      command.includes(`/${name}.app/Contents/MacOS/`)
+      normalized.includes(`/${name}.app/Contents/MacOS/${name}`) ||
+      normalized.endsWith(`/Contents/MacOS/${name}`)
     ) {
       return true;
     }
@@ -372,7 +381,7 @@ function commandMatchesPlayer(command, player) {
 }
 
 /**
- * Lists running process ids that belong to a catalog music player on this Mac.
+ * Lists running main-executable process ids for a catalog music player on macOS.
  * @param {string} playerId
  * @returns {Promise<number[]>}
  */
@@ -414,8 +423,30 @@ async function findPlayerProcessIds(playerId) {
 }
 
 /**
+ * Looks up a single process command path via `ps`.
+ * @param {number} pid
+ * @returns {Promise<string|null>}
+ */
+async function readProcessCommand(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return null;
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      "/bin/ps",
+      ["-p", String(pid), "-o", "comm="],
+      { maxBuffer: 64 * 1024 }
+    );
+    const command = String(stdout || "").trim();
+    return command || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Builds the AudioTee includeProcesses list for the active Now Playing track.
- * Prefers MediaRemote's process id, then expands to every matching app PID.
+ * Only main player executables are included — helper PIDs make AudioTee exit.
  * @param {{ processIdentifier?: number|null, playerId?: string|null, targetPlayerId?: string|null }} track
  * @returns {Promise<number[]>}
  */
@@ -423,17 +454,23 @@ async function resolveCaptureProcessIds(track) {
   const playerId = normalizeTargetPlayerId(
     track?.playerId || track?.targetPlayerId
   );
-  const pids = new Set();
+  const player = getPlayerById(playerId);
+  const pids = new Set(await findPlayerProcessIds(playerId));
+
+  const mediaPid = track?.processIdentifier;
   if (
-    typeof track?.processIdentifier === "number" &&
-    Number.isFinite(track.processIdentifier) &&
-    track.processIdentifier > 0
+    player &&
+    typeof mediaPid === "number" &&
+    Number.isFinite(mediaPid) &&
+    mediaPid > 0 &&
+    !pids.has(mediaPid)
   ) {
-    pids.add(track.processIdentifier);
+    const command = await readProcessCommand(mediaPid);
+    if (command && commandMatchesPlayer(command, player)) {
+      pids.add(mediaPid);
+    }
   }
-  for (const pid of await findPlayerProcessIds(playerId)) {
-    pids.add(pid);
-  }
+
   return [...pids].sort((a, b) => a - b);
 }
 

@@ -139,7 +139,7 @@ describe("music players", () => {
     assert.equal(apple.namePattern.test("Apple Music Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"), false);
   });
 
-  it("matches player process paths including Helpers under the same .app", () => {
+  it("matches only the player's main MacOS executable for AudioTee taps", () => {
     const {
       commandMatchesPlayer,
       getPlayerById
@@ -157,7 +157,14 @@ describe("music players", () => {
         "/Applications/NeteaseMusic.app/Contents/Frameworks/NeteaseMusic Helper.app/Contents/MacOS/NeteaseMusic Helper",
         netease
       ),
-      true
+      false
+    );
+    assert.equal(
+      commandMatchesPlayer(
+        "/Applications/NeteaseMusic.app/Contents/Frameworks/NeteaseMusic Helper (GPU).app/Contents/MacOS/NeteaseMusic Helper (GPU)",
+        netease
+      ),
+      false
     );
     assert.equal(
       commandMatchesPlayer(

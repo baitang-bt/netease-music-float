@@ -27,6 +27,10 @@ function createAudioCapture(options) {
   let emitTimer = null;
   let lastEmitAt = 0;
   let pendingMeta = { muted: false };
+  /** True after a filtered tap failed and we already fell back to all-process capture. */
+  let usedUnfilteredFallback = false;
+  /** PIDs last passed to AudioTee; empty means unfiltered. */
+  let activeIncludeProcesses = null;
   const normalizeBands = createBandNormalizer();
 
   /**
@@ -104,6 +108,10 @@ function createAudioCapture(options) {
     const includeProcesses = options.includeProcessIds
       ? options.includeProcessIds()
       : null;
+    const filtered =
+      Array.isArray(includeProcesses) && includeProcesses.length > 0
+        ? includeProcesses
+        : null;
 
     const teeOptions = {
       sampleRate: SAMPLE_RATE,
@@ -113,8 +121,11 @@ function createAudioCapture(options) {
     if (options.binaryPath) {
       teeOptions.binaryPath = options.binaryPath;
     }
-    if (Array.isArray(includeProcesses) && includeProcesses.length > 0) {
-      teeOptions.includeProcesses = includeProcesses;
+    if (filtered && !usedUnfilteredFallback) {
+      teeOptions.includeProcesses = filtered;
+      activeIncludeProcesses = filtered.slice();
+    } else {
+      activeIncludeProcesses = null;
     }
 
     audiotee = new AudioTee(teeOptions);
@@ -129,6 +140,14 @@ function createAudioCapture(options) {
         muted: true,
         error: lastError
       });
+      // Helper PIDs (and some players) make filtered taps exit after start().
+      // Fall back once to whole-system capture so the spectrum keeps working.
+      if (activeIncludeProcesses && !usedUnfilteredFallback) {
+        usedUnfilteredFallback = true;
+        stop()
+          .then(() => start())
+          .catch(() => {});
+      }
     });
 
     try {
@@ -144,6 +163,10 @@ function createAudioCapture(options) {
         muted: true,
         error: lastError
       });
+      if (filtered && !usedUnfilteredFallback) {
+        usedUnfilteredFallback = true;
+        return start();
+      }
       return { ok: false, error: lastError };
     }
   }
@@ -170,8 +193,10 @@ function createAudioCapture(options) {
 
   /**
    * Restarts capture so includeProcesses can be refreshed for a new PID.
+   * Clears the unfiltered fallback flag so a corrected PID list can be retried.
    */
   async function restart() {
+    usedUnfilteredFallback = false;
     await stop();
     return start();
   }
