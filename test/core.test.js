@@ -16,6 +16,7 @@ const { COMMANDS } = require("../electron/media-remote");
 const {
   createWindowsMediaController
 } = require("../electron/windows-media-controller");
+const { validateFloatSize } = require("../electron/state-store");
 
 describe("fft", () => {
   it("rejects non power-of-two lengths", () => {
@@ -138,10 +139,90 @@ describe("music players", () => {
     assert.equal(apple.namePattern.test("Apple Music Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"), false);
   });
 
+  it("matches player process paths including Helpers under the same .app", () => {
+    const {
+      commandMatchesPlayer,
+      getPlayerById
+    } = require("../electron/music-players");
+    const netease = getPlayerById("netease");
+    assert.equal(
+      commandMatchesPlayer(
+        "/Applications/NeteaseMusic.app/Contents/MacOS/NeteaseMusic",
+        netease
+      ),
+      true
+    );
+    assert.equal(
+      commandMatchesPlayer(
+        "/Applications/NeteaseMusic.app/Contents/Frameworks/NeteaseMusic Helper.app/Contents/MacOS/NeteaseMusic Helper",
+        netease
+      ),
+      true
+    );
+    assert.equal(
+      commandMatchesPlayer(
+        "/Applications/Spotify.app/Contents/MacOS/Spotify",
+        netease
+      ),
+      false
+    );
+    assert.equal(
+      commandMatchesPlayer(
+        "/System/Applications/Music.app/Contents/MacOS/Music",
+        getPlayerById("apple-music")
+      ),
+      true
+    );
+  });
+
   it("exposes disk-detectable catalog entries", () => {
     assert.ok(MUSIC_PLAYERS.length >= 3);
     assert.ok(getPlayerById("spotify"));
     assert.equal(typeof playerExistsOnDisk(getPlayerById("apple-music")), "boolean");
+  });
+});
+
+describe("title fonts", () => {
+  const {
+    TITLE_FONT_PRESETS,
+    normalizeCustomFonts,
+    normalizeTitleFontId,
+    resolveTitleFontStack,
+    buildCustomFontFaceCss,
+    clampTitleFontSize,
+    MAX_TITLE_FONT_SIZE
+  } = require("../src/title-fonts");
+
+  it("ships artistic presets beyond the original six", () => {
+    assert.ok(Object.keys(TITLE_FONT_PRESETS).length >= 16);
+    assert.ok(TITLE_FONT_PRESETS.xingkai);
+    assert.ok(TITLE_FONT_PRESETS.zapfino);
+  });
+
+  it("accepts imported fonts when resolving stacks and ids", () => {
+    const custom = normalizeCustomFonts([
+      {
+        id: "cf_ab12cd34ef56",
+        label: "Demo",
+        family: "nf-cf_ab12cd34ef56",
+        fileName: "cf_ab12cd34ef56.ttf"
+      }
+    ]);
+    assert.equal(custom.length, 1);
+    assert.equal(normalizeTitleFontId("cf_ab12cd34ef56", custom), "cf_ab12cd34ef56");
+    assert.match(
+      resolveTitleFontStack("cf_ab12cd34ef56", custom),
+      /^"nf-cf_ab12cd34ef56"/
+    );
+    assert.match(
+      buildCustomFontFaceCss(custom),
+      /nf-font:\/\/fonts\/cf_ab12cd34ef56\.ttf/
+    );
+  });
+
+  it("clamps title size up to the artistic-font maximum", () => {
+    assert.equal(clampTitleFontSize(99), MAX_TITLE_FONT_SIZE);
+    assert.equal(clampTitleFontSize(8), 10);
   });
 });
 
@@ -184,5 +265,21 @@ describe("Windows media controller", () => {
     assert.equal(track.elapsed, 12);
     assert.equal(track.duration, 180);
     assert.equal(updates.length, 1);
+  });
+});
+
+describe("float size", () => {
+  it("accepts stretched float dimensions within the new limits", () => {
+    assert.deepEqual(
+      validateFloatSize({ width: 700, expandedHeight: 600 }),
+      { width: 700, expandedHeight: 600 }
+    );
+  });
+
+  it("falls back when values are outside the supported range", () => {
+    assert.deepEqual(
+      validateFloatSize({ width: 900, expandedHeight: 50 }),
+      { width: 320, expandedHeight: 220 }
+    );
   });
 });

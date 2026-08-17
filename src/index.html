@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' nf-font:"
     />
     <title>网易云浮窗</title>
     <link rel="stylesheet" href="./vendor/material-symbols/material-symbols.css" />
@@ -12,20 +12,35 @@
   </head>
   <body>
     <div id="app" class="float">
-      <header class="drag-region" id="drag-handle" title="拖动浮窗">
+      <header class="drag-region" id="drag-handle" data-i18n-title="app.drag">
         <div class="header-left">
-          <button type="button" id="open-app" class="icon-btn" title="打开音乐软件">
+          <button
+            type="button"
+            id="open-app"
+            class="icon-btn"
+            data-i18n-title="app.openPlayer"
+          >
             <span class="material-symbols-outlined">open_in_new</span>
           </button>
-          <span id="status-pill" class="pill">等待</span>
+          <span id="status-pill" class="pill" data-i18n="status.waiting">等待</span>
         </div>
-        <button type="button" id="btn-settings" class="icon-btn" title="设置">
+        <button
+          type="button"
+          id="btn-settings"
+          class="icon-btn"
+          data-i18n-title="app.settings"
+        >
           <span class="material-symbols-outlined">settings</span>
         </button>
       </header>
 
       <main class="body">
-        <button type="button" id="artwork-btn" class="artwork" title="打开音乐软件">
+        <button
+          type="button"
+          id="artwork-btn"
+          class="artwork"
+          data-i18n-title="app.openPlayer"
+        >
           <img id="artwork" alt="" hidden />
           <span id="artwork-fallback" class="artwork-fallback material-symbols-outlined">
             music_note
@@ -35,7 +50,9 @@
         <div class="meta">
           <div id="title" class="title">
             <span class="title-stack">
-              <span id="title-text" class="title-text">未在播放</span>
+              <span id="title-text" class="title-text" data-i18n="float.notPlaying">
+                未在播放
+              </span>
               <span id="title-translation" class="title-translation" hidden></span>
             </span>
           </div>
@@ -46,22 +63,36 @@
       </main>
 
       <footer class="controls">
-        <button type="button" id="btn-prev" title="上一首">
+        <button type="button" id="btn-prev" data-i18n-title="app.prev">
           <span class="material-symbols-outlined">skip_previous</span>
         </button>
-        <button type="button" id="btn-toggle" title="播放/暂停">
+        <button type="button" id="btn-toggle" data-i18n-title="app.toggle">
           <span id="icon-toggle" class="material-symbols-outlined filled">play_arrow</span>
         </button>
-        <button type="button" id="btn-next" title="下一首">
+        <button type="button" id="btn-next" data-i18n-title="app.next">
           <span class="material-symbols-outlined">skip_next</span>
         </button>
-        <button type="button" id="btn-mode" title="播放模式：顺序" data-mode="sequential">
+        <button
+          type="button"
+          id="btn-mode"
+          data-i18n-title="mode.title.sequential"
+          data-mode="sequential"
+        >
           <span id="icon-mode" class="material-symbols-outlined">repeat</span>
         </button>
       </footer>
+
+      <button
+        type="button"
+        id="resize-handle"
+        class="resize-handle"
+        data-i18n-title="app.resize"
+        aria-label="Resize"
+      ></button>
     </div>
     <script src="./theme-colors.js"></script>
     <script src="./title-fonts.js"></script>
+    <script src="./i18n.js"></script>
     <script src="./spectrum.js"></script>
     <script src="./float.js"></script>
   </body>

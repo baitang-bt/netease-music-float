@@ -36,6 +36,39 @@ contextBridge.exposeInMainWorld("neteaseFloat", {
   /** Ends a drag gesture and persists position. */
   dragEnd: () => ipcRenderer.send("float:drag-end"),
 
+  /** Starts a custom SE-corner resize from the renderer. */
+  resizeStart: () => ipcRenderer.send("float:resize-start"),
+
+  /**
+   * Applies a resize delta relative to resize-start bounds.
+   * @param {number} deltaX
+   * @param {number} deltaY
+   */
+  resizeMove: (deltaX, deltaY) =>
+    ipcRenderer.send("float:resize-move", deltaX, deltaY),
+
+  /** Ends a resize gesture and persists size. */
+  resizeEnd: () => ipcRenderer.send("float:resize-end"),
+
+  /** Returns the current float width / expanded height and clamp limits. */
+  getFloatSize: () => ipcRenderer.invoke("float:get-size"),
+
+  /**
+   * Applies and persists float width / expanded height.
+   * @param {{ width?: number, expandedHeight?: number }} size
+   */
+  setFloatSize: (size) => ipcRenderer.invoke("float:set-size", size || {}),
+
+  /**
+   * Subscribes to float size changes (grip resize or Settings sliders).
+   * @param {(size: object) => void} callback
+   */
+  onFloatSizeChanged: (callback) => {
+    const listener = (_event, size) => callback(size);
+    ipcRenderer.on("float:size-changed", listener);
+    return () => ipcRenderer.removeListener("float:size-changed", listener);
+  },
+
   /**
    * Expands or collapses the float window height.
    * @param {boolean} expanded
@@ -88,6 +121,15 @@ contextBridge.exposeInMainWorld("neteaseFloat", {
 
   /** Lists locally installed catalog music apps for Settings. */
   listInstalledPlayers: () => ipcRenderer.invoke("players:list-installed"),
+
+  /** Opens a file picker and imports a local title font. */
+  importFont: () => ipcRenderer.invoke("fonts:import"),
+
+  /**
+   * Removes an imported title font by id.
+   * @param {string} fontId
+   */
+  removeFont: (fontId) => ipcRenderer.invoke("fonts:remove", fontId),
 
   /** Returns system-audio capture / permission status. */
   getAudioStatus: () => ipcRenderer.invoke("audio:get-status"),

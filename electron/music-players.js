@@ -344,6 +344,99 @@ async function openWindowsPlayer(player) {
   };
 }
 
+/**
+ * True when a `ps` command path belongs to the given catalog player's app bundle
+ * or main executable (Helpers under the same .app are included so audio from
+ * helper processes is not dropped by an includeProcesses filter).
+ * @param {string} command
+ * @param {typeof MUSIC_PLAYERS[number]} player
+ */
+function commandMatchesPlayer(command, player) {
+  if (!command || !player) {
+    return false;
+  }
+  for (const fileName of player.appFileNames) {
+    if (command.includes(`/${fileName}/`) || command.includes(`/${fileName} `)) {
+      return true;
+    }
+  }
+  for (const name of player.appNames) {
+    if (
+      command.endsWith(`/${name}`) ||
+      command.includes(`/${name}.app/Contents/MacOS/`)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Lists running process ids that belong to a catalog music player on this Mac.
+ * @param {string} playerId
+ * @returns {Promise<number[]>}
+ */
+async function findPlayerProcessIds(playerId) {
+  if (process.platform !== "darwin") {
+    return [];
+  }
+  const player = getPlayerById(normalizeTargetPlayerId(playerId));
+  if (!player) {
+    return [];
+  }
+
+  try {
+    const { stdout } = await execFileAsync("/bin/ps", ["-axo", "pid=,comm="], {
+      maxBuffer: 2 * 1024 * 1024
+    });
+    const pids = [];
+    for (const line of stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      const match = trimmed.match(/^(\d+)\s+(.+)$/);
+      if (!match) {
+        continue;
+      }
+      const pid = Number(match[1]);
+      if (!Number.isFinite(pid) || pid <= 0) {
+        continue;
+      }
+      if (commandMatchesPlayer(match[2], player)) {
+        pids.push(pid);
+      }
+    }
+    return pids;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Builds the AudioTee includeProcesses list for the active Now Playing track.
+ * Prefers MediaRemote's process id, then expands to every matching app PID.
+ * @param {{ processIdentifier?: number|null, playerId?: string|null, targetPlayerId?: string|null }} track
+ * @returns {Promise<number[]>}
+ */
+async function resolveCaptureProcessIds(track) {
+  const playerId = normalizeTargetPlayerId(
+    track?.playerId || track?.targetPlayerId
+  );
+  const pids = new Set();
+  if (
+    typeof track?.processIdentifier === "number" &&
+    Number.isFinite(track.processIdentifier) &&
+    track.processIdentifier > 0
+  ) {
+    pids.add(track.processIdentifier);
+  }
+  for (const pid of await findPlayerProcessIds(playerId)) {
+    pids.add(pid);
+  }
+  return [...pids].sort((a, b) => a - b);
+}
+
 module.exports = {
   MUSIC_PLAYERS,
   DEFAULT_PLAYER_ID,
@@ -353,5 +446,8 @@ module.exports = {
   isPlayerInstalled,
   isPlayerNowPlaying,
   openOrFocusPlayer,
-  playerExistsOnDisk
+  playerExistsOnDisk,
+  commandMatchesPlayer,
+  findPlayerProcessIds,
+  resolveCaptureProcessIds
 };

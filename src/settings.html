@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' nf-font:"
     />
     <title>设置</title>
     <link rel="stylesheet" href="./vendor/material-symbols/material-symbols.css" />
@@ -12,39 +12,91 @@
   </head>
   <body>
     <div class="settings-shell">
-      <aside class="settings-sidebar" aria-label="设置">
+      <aside class="settings-sidebar" data-i18n-aria="settings.title">
         <header class="sidebar-brand">
-          <strong>设置</strong>
+          <strong data-i18n="settings.title">设置</strong>
         </header>
         <nav class="sidebar-nav">
-          <button class="nav-item is-active" type="button">常规</button>
+          <button class="nav-item is-active" type="button" data-i18n="settings.nav.general">
+            常规
+          </button>
         </nav>
         <footer class="sidebar-footer">
-          <button type="button" id="btn-quit" class="danger-button">退出</button>
+          <button type="button" id="btn-quit" class="danger-button" data-i18n="settings.quit">
+            退出
+          </button>
         </footer>
       </aside>
 
       <main class="settings-main">
         <header class="panel-header">
-          <h1>常规</h1>
+          <h1 data-i18n="settings.panel.general">常规</h1>
         </header>
 
         <div class="card-grid">
           <article class="card">
-            <h2 class="card-title">窗口</h2>
+            <h2 class="card-title" data-i18n="settings.window">窗口</h2>
             <label class="setting-row">
               <span class="setting-text">
-                <strong>始终置顶</strong>
+                <strong data-i18n="settings.alwaysOnTop">始终置顶</strong>
               </span>
               <input id="always-on-top" type="checkbox" />
             </label>
+            <label class="setting-row setting-row-stack">
+              <span class="setting-text">
+                <strong data-i18n="settings.language">语言</strong>
+                <small data-i18n="settings.language.help">
+                  界面语言；歌词原文与翻译不受影响。
+                </small>
+              </span>
+              <select id="ui-locale" class="setting-select"></select>
+            </label>
+            <label class="setting-row">
+              <span class="setting-text">
+                <strong data-i18n="settings.floatWidth">浮窗宽度</strong>
+                <small id="float-width-label">320px</small>
+              </span>
+              <input
+                id="float-width"
+                type="range"
+                min="260"
+                max="720"
+                step="4"
+                value="320"
+              />
+            </label>
+            <label class="setting-row">
+              <span class="setting-text">
+                <strong data-i18n="settings.floatHeight">展开高度</strong>
+                <small id="float-height-label">220px</small>
+              </span>
+              <input
+                id="float-height"
+                type="range"
+                min="180"
+                max="640"
+                step="4"
+                value="220"
+              />
+            </label>
+            <p class="card-hint" data-i18n="settings.floatSize.help">
+              也可在浮窗右下角拖动调整；收起时只改宽度。
+            </p>
+            <button
+              type="button"
+              id="btn-reset-float-size"
+              class="secondary-button"
+              data-i18n="settings.resetFloatSize"
+            >
+              恢复默认大小
+            </button>
           </article>
 
           <article class="card">
-            <h2 class="card-title">更新</h2>
+            <h2 class="card-title" data-i18n="settings.updates">更新</h2>
             <label class="setting-row">
               <span class="setting-text">
-                <strong>启动时检查更新</strong>
+                <strong data-i18n="settings.autoCheckUpdates">启动时检查更新</strong>
               </span>
               <input id="auto-check-updates" type="checkbox" />
             </label>
@@ -52,110 +104,129 @@
             <div class="permission-head">
               <button type="button" id="btn-check-update" class="secondary-button">
                 <span class="material-symbols-outlined">system_update</span>
-                检查更新
+                <span data-i18n="settings.checkUpdate">检查更新</span>
               </button>
               <button type="button" id="btn-install-update" class="primary-button" hidden>
                 <span class="material-symbols-outlined">restart_alt</span>
-                重启并安装
+                <span data-i18n="settings.installUpdate">重启并安装</span>
               </button>
             </div>
           </article>
 
           <article class="card">
-            <h2 class="card-title">音乐软件</h2>
+            <h2 class="card-title" data-i18n="settings.players">音乐软件</h2>
             <label class="setting-row setting-row-stack">
               <span class="setting-text">
-                <strong>跟随播放器</strong>
+                <strong data-i18n="settings.followPlayer">跟随播放器</strong>
               </span>
               <select id="target-player" class="setting-select"></select>
             </label>
             <button type="button" id="btn-open-player" class="secondary-button">
               <span class="material-symbols-outlined">open_in_new</span>
-              <span id="open-player-label">打开所选音乐软件</span>
+              <span id="open-player-label" data-i18n="settings.openPlayer">打开所选音乐软件</span>
             </button>
           </article>
 
           <article class="card" id="playback-mode-card">
-            <h2 class="card-title">播放模式</h2>
+            <h2 class="card-title" data-i18n="settings.playbackMode">播放模式</h2>
             <label class="setting-row setting-row-stack">
               <span class="setting-text">
-                <strong>开机自动切换</strong>
+                <strong data-i18n="settings.launchMode">开机自动切换</strong>
               </span>
               <select id="launch-playback-mode" class="setting-select">
-                <option value="keep">保持现状</option>
-                <option value="sequential">顺序播放</option>
-                <option value="all">列表循环</option>
-                <option value="one">单曲循环</option>
-                <option value="shuffle">随机播放</option>
+                <option value="keep" data-i18n="settings.mode.keep">保持现状</option>
+                <option value="sequential" data-i18n="mode.sequential">顺序播放</option>
+                <option value="all" data-i18n="mode.all">列表循环</option>
+                <option value="one" data-i18n="mode.one">单曲循环</option>
+                <option value="shuffle" data-i18n="mode.shuffle">随机播放</option>
               </select>
             </label>
             <button type="button" id="btn-accessibility" class="secondary-button">
               <span class="material-symbols-outlined">accessibility_new</span>
-              授权辅助功能
+              <span data-i18n="settings.requestAx">授权辅助功能</span>
             </button>
-            <p id="accessibility-status" class="card-hint">检查中…</p>
+            <p id="accessibility-status" class="card-hint" data-i18n="settings.axChecking">
+              检查中…
+            </p>
           </article>
 
           <article class="card">
-            <h2 class="card-title">外观</h2>
+            <h2 class="card-title" data-i18n="settings.appearance">外观</h2>
             <label class="setting-row">
               <span class="setting-text">
-                <strong>透明小窗</strong>
+                <strong data-i18n="settings.transparentFloat">透明小窗</strong>
               </span>
               <input id="transparent-float" type="checkbox" />
             </label>
             <label class="setting-row">
               <span class="setting-text">
-                <strong>小窗颜色</strong>
+                <strong data-i18n="settings.windowColor">小窗颜色</strong>
               </span>
               <input id="window-color" type="color" value="#24242a" />
             </label>
             <label class="setting-row">
               <span class="setting-text">
-                <strong>声浪颜色</strong>
+                <strong data-i18n="settings.spectrumColor">声浪颜色</strong>
               </span>
               <input id="spectrum-color" type="color" value="#e60026" />
             </label>
             <label class="setting-row setting-row-stack">
               <span class="setting-text">
-                <strong>标题字体</strong>
+                <strong data-i18n="settings.titleFont">标题字体</strong>
               </span>
               <select id="title-font" class="setting-select"></select>
             </label>
+            <div class="font-actions">
+              <button type="button" id="btn-import-font" class="secondary-button" data-i18n="settings.importFont">
+                导入字体
+              </button>
+              <button
+                type="button"
+                id="btn-remove-font"
+                class="secondary-button"
+                hidden
+                data-i18n="settings.removeFont"
+              >
+                删除导入字体
+              </button>
+            </div>
             <label class="setting-row">
               <span class="setting-text">
-                <strong>标题字号</strong>
+                <strong data-i18n="settings.titleSize">标题字号</strong>
                 <small id="title-font-size-label">13px</small>
               </span>
               <input
                 id="title-font-size"
                 type="range"
                 min="10"
-                max="22"
+                max="28"
                 step="1"
                 value="13"
               />
             </label>
             <p id="title-font-preview" class="font-preview">
-              网易云 · NetEase · こんにちは
+              网易云 · NetEase · こんにちは · ただ在るだけ
             </p>
-            <button type="button" id="btn-reset-colors" class="secondary-button">
+            <button type="button" id="btn-reset-colors" class="secondary-button" data-i18n="settings.resetColors">
               恢复默认配色
             </button>
           </article>
 
           <article class="card" id="audio-capture-card">
-            <h2 class="card-title">系统音频录制</h2>
+            <h2 class="card-title" data-i18n="settings.audio">系统音频录制</h2>
+            <p class="card-hint" data-i18n="settings.audio.hint">
+              仅采集设置里选中的音乐软件进程音频，其它 App 的声音不会进频谱。
+            </p>
             <div class="permission-head">
               <span class="setting-text">
-                <strong>采集状态</strong>
+                <strong data-i18n="settings.audio.status">采集状态</strong>
                 <small id="audio-status-detail">检查中…</small>
               </span>
               <span id="audio-status" class="status-chip">检查中</span>
             </div>
             <button type="button" id="btn-audio-permission" class="primary-button">
               <span class="material-symbols-outlined">shield_lock</span>
-              请求录音权限
+              <span data-i18n="settings.audio.request">请求录音权限</span>
             </button>
           </article>
         </div>
@@ -163,6 +234,7 @@
     </div>
     <script src="./theme-colors.js"></script>
     <script src="./title-fonts.js"></script>
+    <script src="./i18n.js"></script>
     <script src="./settings.js"></script>
   </body>
 </html>

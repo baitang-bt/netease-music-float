@@ -94,7 +94,7 @@ function createAudioCapture(options) {
     }
   }
 
-  /** Starts capturing system audio (optionally filtered to NetEase PIDs). */
+  /** Starts capturing system audio (optionally filtered to selected player PIDs). */
   async function start() {
     if (running) {
       return { ok: true };

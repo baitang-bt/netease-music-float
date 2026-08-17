@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const {
   app,
   BrowserWindow,
@@ -7,7 +8,9 @@ const {
   Menu,
   nativeImage,
   ipcMain,
-  screen
+  screen,
+  protocol,
+  net
 } = require("electron");
 const { createStateStore } = require("./state-store");
 const { createPlatformMediaController } = require("./media-controller");
@@ -15,7 +18,8 @@ const { createAudioCapture } = require("./audio-capture");
 const {
   listInstalledPlayers,
   normalizeTargetPlayerId,
-  openOrFocusPlayer
+  openOrFocusPlayer,
+  resolveCaptureProcessIds
 } = require("./music-players");
 const { openSystemAudioPrivacySettings } = require("./audio-permission");
 const { resolveAudioteeBinary } = require("./paths");
@@ -24,19 +28,43 @@ const {
   setPlaybackMode,
   advancePlaybackMode: advanceNeteasePlaybackMode,
   openAccessibilitySettings,
-  isAccessibilityTrusted,
-  MODE_LABELS
+  isAccessibilityTrusted
 } = require("./netease-playback-mode");
 const { createLyricsController } = require("./netease-lyrics");
 const { createAutoUpdater } = require("./auto-update");
+const {
+  importCustomFont,
+  removeCustomFontFile,
+  resolveCustomFontPath,
+  getCustomFontsDir
+} = require("./custom-fonts");
+const {
+  t,
+  setActiveLocale,
+  resolveLocale
+} = require("../src/i18n");
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "nf-font",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+      stream: true,
+      corsEnabled: true
+    }
+  }
+]);
 
 const FLOAT_WIDTH_DEFAULT = 320;
 const FLOAT_HEIGHT_COLLAPSED = 64;
 const FLOAT_HEIGHT_EXPANDED_DEFAULT = 220;
 const FLOAT_MIN_WIDTH = 260;
-const FLOAT_MAX_WIDTH = 560;
+const FLOAT_MAX_WIDTH = 720;
 const FLOAT_MIN_EXPANDED_HEIGHT = 180;
-const FLOAT_MAX_EXPANDED_HEIGHT = 480;
+const FLOAT_MAX_EXPANDED_HEIGHT = 640;
 /** Matches the AppKit frame animation so size limits are restored after it. */
 const FLOAT_RESIZE_ANIMATION_MS = 260;
 const SETTINGS_SIZE = { width: 500, height: 640 };
@@ -49,7 +77,13 @@ let tray = null;
 let stateStore = null;
 let mediaController = null;
 let audioCapture = null;
+/** Process ids currently fed to AudioTee includeProcesses (target player only). */
+let captureIncludePids = [];
+/** Prevents overlapping AudioTee restarts when track updates arrive quickly. */
+let captureSyncToken = 0;
 let dragOrigin = null;
+/** Bounds snapshot at the start of a custom SE-corner resize. */
+let resizeOrigin = null;
 let floatExpanded = false;
 /** Pending restore of the size limits relaxed for the resize animation. */
 let floatConstraintTimer = null;
@@ -142,20 +176,15 @@ function persistFloatSizeFromWindow() {
   if (
     !floatWindow ||
     floatWindow.isDestroyed() ||
-    !floatExpanded ||
     floatBoundsAnimating
   ) {
     return;
   }
   const bounds = floatWindow.getBounds();
-  floatWidth = Math.min(
-    FLOAT_MAX_WIDTH,
-    Math.max(FLOAT_MIN_WIDTH, bounds.width)
-  );
-  floatExpandedHeight = Math.min(
-    FLOAT_MAX_EXPANDED_HEIGHT,
-    Math.max(FLOAT_MIN_EXPANDED_HEIGHT, bounds.height)
-  );
+  floatWidth = clampFloatWidth(bounds.width);
+  if (floatExpanded) {
+    floatExpandedHeight = clampFloatExpandedHeight(bounds.height);
+  }
   stateStore.setFloatSize({
     width: floatWidth,
     expandedHeight: floatExpandedHeight
@@ -164,8 +193,93 @@ function persistFloatSizeFromWindow() {
     x: bounds.x,
     y: bounds.y,
     width: floatWidth,
-    height: floatExpandedHeight
+    height: floatExpanded ? floatExpandedHeight : FLOAT_HEIGHT_COLLAPSED
   });
+  broadcastFloatSize();
+}
+
+/**
+ * Clamps float width into the supported range.
+ * @param {number} width
+ */
+function clampFloatWidth(width) {
+  return Math.min(
+    FLOAT_MAX_WIDTH,
+    Math.max(FLOAT_MIN_WIDTH, Math.round(Number(width) || FLOAT_WIDTH_DEFAULT))
+  );
+}
+
+/**
+ * Clamps expanded float height into the supported range.
+ * @param {number} height
+ */
+function clampFloatExpandedHeight(height) {
+  return Math.min(
+    FLOAT_MAX_EXPANDED_HEIGHT,
+    Math.max(
+      FLOAT_MIN_EXPANDED_HEIGHT,
+      Math.round(Number(height) || FLOAT_HEIGHT_EXPANDED_DEFAULT)
+    )
+  );
+}
+
+/**
+ * Applies a remembered or user-chosen float size to the live window.
+ * @param {{ width?: number, expandedHeight?: number }} size
+ * @param {{ persist?: boolean }} [options]
+ */
+function applyFloatSize(size, options = {}) {
+  const nextWidth = clampFloatWidth(
+    size?.width ?? floatWidth
+  );
+  const nextExpandedHeight = clampFloatExpandedHeight(
+    size?.expandedHeight ?? floatExpandedHeight
+  );
+  floatWidth = nextWidth;
+  floatExpandedHeight = nextExpandedHeight;
+
+  if (options.persist !== false) {
+    stateStore?.setFloatSize({
+      width: floatWidth,
+      expandedHeight: floatExpandedHeight
+    });
+  }
+
+  if (floatWindow && !floatWindow.isDestroyed()) {
+    const bounds = floatWindow.getBounds();
+    floatWindow.setBounds({
+      x: bounds.x,
+      y: bounds.y,
+      width: floatWidth,
+      height: floatExpanded ? floatExpandedHeight : FLOAT_HEIGHT_COLLAPSED
+    });
+    applyFloatSizeConstraints();
+  }
+
+  broadcastFloatSize();
+  return {
+    width: floatWidth,
+    expandedHeight: floatExpandedHeight,
+    minWidth: FLOAT_MIN_WIDTH,
+    maxWidth: FLOAT_MAX_WIDTH,
+    minExpandedHeight: FLOAT_MIN_EXPANDED_HEIGHT,
+    maxExpandedHeight: FLOAT_MAX_EXPANDED_HEIGHT
+  };
+}
+
+/** Pushes the current float size to the settings renderer. */
+function broadcastFloatSize() {
+  const payload = {
+    width: floatWidth,
+    expandedHeight: floatExpandedHeight,
+    minWidth: FLOAT_MIN_WIDTH,
+    maxWidth: FLOAT_MAX_WIDTH,
+    minExpandedHeight: FLOAT_MIN_EXPANDED_HEIGHT,
+    maxExpandedHeight: FLOAT_MAX_EXPANDED_HEIGHT
+  };
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.webContents.send("float:size-changed", payload);
+  }
 }
 
 /** Creates the transparent always-on-top floating BrowserWindow. */
@@ -243,11 +357,21 @@ function createTray() {
       ? nativeImage.createEmpty()
       : resolveAppIcon();
   tray = new Tray(icon);
-  tray.setTitle("♫");
-  tray.setToolTip("网易云浮窗");
+  if (process.platform === "darwin") {
+    tray.setTitle("♫");
+  }
+  rebuildTrayMenu();
+}
+
+/** Rebuilds tray labels after a locale change without recreating the Tray. */
+function rebuildTrayMenu() {
+  if (!tray) {
+    return;
+  }
+  tray.setToolTip(t("app.name"));
   const menu = Menu.buildFromTemplate([
     {
-      label: "显示浮窗",
+      label: t("tray.show"),
       click: () => {
         if (!floatWindow) {
           createFloatWindow();
@@ -257,21 +381,21 @@ function createTray() {
       }
     },
     {
-      label: "隐藏浮窗",
+      label: t("tray.hide"),
       click: () => floatWindow?.hide()
     },
     {
-      label: "设置",
+      label: t("tray.settings"),
       click: () => toggleSettingsWindow()
     },
     {
-      label: "检查更新",
+      label: t("tray.checkUpdate"),
       click: () => {
         autoUpdaterController?.checkForUpdates({ silent: false });
       }
     },
     {
-      label: "打开当前音乐软件",
+      label: t("tray.openPlayer"),
       click: () => {
         const playerId = stateStore?.getSettings().targetPlayerId;
         openOrFocusPlayer(playerId).catch(() => {});
@@ -279,11 +403,30 @@ function createTray() {
     },
     { type: "separator" },
     {
-      label: "退出",
+      label: t("tray.quit"),
       click: () => app.quit()
     }
   ]);
   tray.setContextMenu(menu);
+}
+
+/**
+ * Applies the settings locale preference to main-process strings (tray, hints).
+ */
+function syncAppLocale() {
+  const setting = stateStore?.getSettings?.().locale;
+  setActiveLocale(resolveLocale(setting, app.getLocale()));
+  rebuildTrayMenu();
+}
+
+/** Translated playback-mode labels for IPC consumers. */
+function modeLabels() {
+  return {
+    sequential: t("mode.sequential"),
+    all: t("mode.all"),
+    one: t("mode.one"),
+    shuffle: t("mode.shuffle")
+  };
 }
 
 /** Resolves the packaged/development app icon for platforms with icon-only trays. */
@@ -578,12 +721,13 @@ function broadcastUpdateStatus(payload) {
 }
 
 /**
- * Softens spectrum when NetEase is paused / inactive.
- * Does not start or restart AudioTee — relaunching the binary re-triggers macOS TCC.
+ * Keeps AudioTee filtered to the selected music player's processes.
+ * Restarts only when the PID set changes — with the stable local identity this
+ * no longer re-prompts TCC the way ad-hoc rebuilds used to.
  * @param {object} track
  */
-function syncAudioCapture(track) {
-  if (!audioCapture) {
+async function syncAudioCapture(track) {
+  if (!audioCapture || !PLATFORM_CAPABILITIES.systemAudioCapture) {
     return;
   }
 
@@ -600,9 +744,41 @@ function syncAudioCapture(track) {
     if (!silenceTimer) {
       silenceTimer = setInterval(() => audioCapture.emitSilence(), 80);
     }
-  } else if (silenceTimer) {
+    return;
+  }
+
+  if (silenceTimer) {
     clearInterval(silenceTimer);
     silenceTimer = null;
+  }
+
+  if (!stateStore?.getSettings?.().systemAudioConsent) {
+    return;
+  }
+
+  const token = (captureSyncToken += 1);
+  const nextPids = await resolveCaptureProcessIds(track);
+  if (token !== captureSyncToken) {
+    return;
+  }
+
+  const samePids =
+    nextPids.length === captureIncludePids.length &&
+    nextPids.every((pid, index) => pid === captureIncludePids[index]);
+
+  if (nextPids.length === 0) {
+    // Without a known player PID we refuse whole-system capture.
+    audioCapture.emitSilence();
+    return;
+  }
+
+  captureIncludePids = nextPids;
+  if (!audioCapture.isRunning()) {
+    await audioCapture.start();
+    return;
+  }
+  if (!samePids) {
+    await audioCapture.restart();
   }
 }
 
@@ -614,7 +790,7 @@ function getAudioPermissionStatus() {
       running: false,
       consent: false,
       error: null,
-      hint: "当前平台暂不支持系统音频频谱。"
+      hint: t("audio.hint.unsupported")
     };
   }
   const error = audioCapture?.getLastError?.() || null;
@@ -633,14 +809,14 @@ function getAudioPermissionStatus() {
     running,
     consent,
     error,
-    hint:
-      "系统设置 → 隐私与安全性 → 屏幕与系统音频录制 →「仅系统音频录制」，勾选 NeteaseFloat，必要时也勾选 audiotee。"
+    hint: t("audio.hint.macos")
   };
 }
 
 /**
- * Starts AudioTee only after the user has opted in (avoids launch-time TCC prompts).
- * @returns {Promise<{ ok: boolean, error?: string|null, skipped?: boolean }>}
+ * Starts AudioTee only after consent, and only once a target-player PID is known
+ * so we never fall back to whole-system capture.
+ * @returns {Promise<{ ok: boolean, error?: string|null, skipped?: boolean, deferred?: boolean, unsupported?: boolean }>}
  */
 async function startAudioCaptureIfAllowed() {
   if (!PLATFORM_CAPABILITIES.systemAudioCapture) {
@@ -652,6 +828,13 @@ async function startAudioCaptureIfAllowed() {
   if (!stateStore.getSettings().systemAudioConsent) {
     return { ok: false, skipped: true };
   }
+  if (latestTrack?.isTarget) {
+    captureIncludePids = await resolveCaptureProcessIds(latestTrack);
+  }
+  if (captureIncludePids.length === 0) {
+    // Wait for syncAudioCapture once Now Playing reports a player process.
+    return { ok: true, skipped: true, deferred: true };
+  }
   return audioCapture.start();
 }
 
@@ -661,11 +844,14 @@ function registerIpc() {
   ipcMain.handle("platform:get-capabilities", () => PLATFORM_CAPABILITIES);
 
   ipcMain.handle("settings:update", (_event, changes) => {
-    const previousPlayerId = stateStore.getSettings().targetPlayerId;
+    const previous = stateStore.getSettings();
     const settings = stateStore.updateSettings(changes || {});
     applyAlwaysOnTop(settings.alwaysOnTop);
+    if (settings.locale !== previous.locale) {
+      syncAppLocale();
+    }
     broadcastSettings(settings);
-    if (settings.targetPlayerId !== previousPlayerId) {
+    if (settings.targetPlayerId !== previous.targetPlayerId) {
       launchPlaybackModeSynced = false;
       knownPlaybackMode = null;
       // Force a Now Playing refresh so the float rematches immediately.
@@ -675,7 +861,7 @@ function registerIpc() {
           playbackMode:
             track.isNetease ? knownPlaybackMode : null
         });
-        syncAudioCapture(track);
+        syncAudioCapture(track).catch(() => {});
         lyricsController?.bindTrack(track);
       }).catch(() => {});
     }
@@ -685,6 +871,45 @@ function registerIpc() {
   /** Returns catalog music apps installed on this Mac for the Settings picker. */
   ipcMain.handle("players:list-installed", async () => listInstalledPlayers());
 
+  /**
+   * Imports a local font file into the userData catalog and selects it.
+   */
+  ipcMain.handle("fonts:import", async () => {
+    const result = await importCustomFont(settingsWindow);
+    if (!result.ok || !result.font) {
+      return result;
+    }
+    const current = stateStore.getSettings().customFonts || [];
+    const customFonts = [...current, result.font];
+    const settings = stateStore.updateSettings({
+      customFonts,
+      titleFontId: result.font.id
+    });
+    broadcastSettings(settings);
+    return { ok: true, font: result.font, settings };
+  });
+
+  /**
+   * Removes an imported font and falls back to the system preset when needed.
+   * @param {string} fontId
+   */
+  ipcMain.handle("fonts:remove", async (_event, fontId) => {
+    const current = stateStore.getSettings();
+    const target = (current.customFonts || []).find((font) => font.id === fontId);
+    if (!target) {
+      return { ok: false, error: "font-not-found" };
+    }
+    removeCustomFontFile(target.fileName);
+    const customFonts = (current.customFonts || []).filter(
+      (font) => font.id !== fontId
+    );
+    const titleFontId =
+      current.titleFontId === fontId ? "system" : current.titleFontId;
+    const settings = stateStore.updateSettings({ customFonts, titleFontId });
+    broadcastSettings(settings);
+    return { ok: true, settings };
+  });
+
   ipcMain.on("settings:toggle-window", () => toggleSettingsWindow());
   ipcMain.on("settings:close-window", () => closeSettingsWindow());
   ipcMain.on("app:quit", () => app.quit());
@@ -693,12 +918,67 @@ function registerIpc() {
     setFloatExpanded(Boolean(expanded));
   });
 
+  ipcMain.handle("float:get-size", () => ({
+    width: floatWidth,
+    expandedHeight: floatExpandedHeight,
+    minWidth: FLOAT_MIN_WIDTH,
+    maxWidth: FLOAT_MAX_WIDTH,
+    minExpandedHeight: FLOAT_MIN_EXPANDED_HEIGHT,
+    maxExpandedHeight: FLOAT_MAX_EXPANDED_HEIGHT
+  }));
+
+  ipcMain.handle("float:set-size", (_event, size) =>
+    applyFloatSize(size || {}, { persist: true })
+  );
+
+  ipcMain.on("float:resize-start", () => {
+    if (!floatWindow || floatWindow.isDestroyed()) {
+      return;
+    }
+    resizeOrigin = floatWindow.getBounds();
+    floatBoundsAnimating = false;
+    // Keep limits open while the custom handle drives setBounds.
+    floatWindow.setResizable(true);
+    floatWindow.setMinimumSize(FLOAT_MIN_WIDTH, FLOAT_HEIGHT_COLLAPSED);
+    floatWindow.setMaximumSize(FLOAT_MAX_WIDTH, FLOAT_MAX_EXPANDED_HEIGHT);
+  });
+
+  ipcMain.on("float:resize-move", (_event, deltaX, deltaY) => {
+    if (!floatWindow || floatWindow.isDestroyed() || !resizeOrigin) {
+      return;
+    }
+    const nextWidth = clampFloatWidth(
+      resizeOrigin.width + (Number(deltaX) || 0)
+    );
+    const nextHeight = floatExpanded
+      ? clampFloatExpandedHeight(
+          resizeOrigin.height + (Number(deltaY) || 0)
+        )
+      : FLOAT_HEIGHT_COLLAPSED;
+    floatWidth = nextWidth;
+    if (floatExpanded) {
+      floatExpandedHeight = nextHeight;
+    }
+    floatWindow.setBounds({
+      x: resizeOrigin.x,
+      y: resizeOrigin.y,
+      width: nextWidth,
+      height: nextHeight
+    });
+  });
+
+  ipcMain.on("float:resize-end", () => {
+    resizeOrigin = null;
+    persistFloatSizeFromWindow();
+    applyFloatSizeConstraints();
+  });
+
   /** Returns current system-audio capture status for the settings UI. */
   ipcMain.handle("audio:get-status", () => getAudioPermissionStatus());
 
   /**
-   * User-initiated permission: remember consent, start capture once, open Settings only if needed.
-   * Does not restart a healthy capture (restart re-triggers macOS TCC every time).
+   * User-initiated permission: remember consent, start capture once a player PID
+   * is known, open Settings only if needed.
    */
   ipcMain.handle("audio:request-permission", async () => {
     if (!PLATFORM_CAPABILITIES.systemAudioCapture) {
@@ -710,10 +990,18 @@ function registerIpc() {
     let openedSettings = false;
 
     if (audioCapture) {
+      if (latestTrack?.isTarget) {
+        captureIncludePids = await resolveCaptureProcessIds(latestTrack);
+      }
       const healthy =
         audioCapture.isRunning() && !audioCapture.getLastError();
       if (healthy) {
         capture = { ok: true, error: null };
+      } else if (captureIncludePids.length === 0) {
+        // Consent is stored; syncAudioCapture will start when a PID appears.
+        capture = { ok: true, error: null };
+        const settingsResult = await openSystemAudioPrivacySettings();
+        openedSettings = Boolean(settingsResult?.ok);
       } else if (audioCapture.isRunning()) {
         capture = await audioCapture.restart();
         const settingsResult = await openSystemAudioPrivacySettings();
@@ -752,7 +1040,7 @@ function registerIpc() {
         mode: null,
         error: "playback-mode-unsupported-platform",
         accessibility: false,
-        labels: MODE_LABELS
+        labels: modeLabels()
       };
     }
     if (stateStore.getSettings().targetPlayerId !== "netease") {
@@ -761,7 +1049,7 @@ function registerIpc() {
         mode: null,
         error: "playback-mode-netease-only",
         accessibility: true,
-        labels: MODE_LABELS
+        labels: modeLabels()
       };
     }
     const result = await advanceNeteasePlaybackMode(knownPlaybackMode);
@@ -773,7 +1061,7 @@ function registerIpc() {
       mode: result.mode || knownPlaybackMode,
       error: result.error || null,
       accessibility: result.accessibility !== false,
-      labels: MODE_LABELS
+      labels: modeLabels()
     };
   });
 
@@ -893,6 +1181,23 @@ async function invokeMediaCommand(command) {
 }
 
 app.whenReady().then(async () => {
+  getCustomFontsDir();
+  protocol.handle("nf-font", (request) => {
+    try {
+      const url = new URL(request.url);
+      const fileName = decodeURIComponent(
+        url.pathname.replace(/^\/+/, "") || url.hostname
+      );
+      const filePath = resolveCustomFontPath(fileName);
+      if (!filePath || !fs.existsSync(filePath)) {
+        return new Response("Not Found", { status: 404 });
+      }
+      return net.fetch(pathToFileURL(filePath).href);
+    } catch {
+      return new Response("Bad Request", { status: 400 });
+    }
+  });
+
   if (process.platform === "darwin") {
     app.dock.show();
     const icon = resolveAppIcon();
@@ -929,7 +1234,7 @@ app.whenReady().then(async () => {
         ...track,
         playbackMode: track.isNetease ? knownPlaybackMode : null
       });
-      syncAudioCapture(track);
+      syncAudioCapture(track).catch(() => {});
       lyricsController?.bindTrack(track);
       if (track.isNetease && !launchPlaybackModeSynced) {
         syncLaunchPlaybackMode().catch(() => {});
@@ -949,16 +1254,18 @@ app.whenReady().then(async () => {
     onLyric: (payload) => broadcastLyric(payload)
   });
   lyricsController.start(() => latestTrack);
-  // Capture all system audio once; filtering by NetEase PID required restart and
-  // caused repeated「系统音频录制」prompts whenever the reported PID changed.
+  // Filter AudioTee to the selected player's PIDs via includeProcesses.
   if (PLATFORM_CAPABILITIES.systemAudioCapture) {
     audioCapture = createAudioCapture({
       binaryPath: resolveAudioteeBinary(),
+      includeProcessIds: () =>
+        captureIncludePids.length > 0 ? captureIncludePids : null,
       onBands: (bands, meta) => broadcastSpectrum(bands, meta)
     });
   }
 
   registerIpc();
+  syncAppLocale();
   createTray();
   createFloatWindow();
   mediaController.start();

@@ -10,6 +10,8 @@ const titleFontSelect = document.querySelector("#title-font");
 const titleFontSizeInput = document.querySelector("#title-font-size");
 const titleFontSizeLabel = document.querySelector("#title-font-size-label");
 const titleFontPreview = document.querySelector("#title-font-preview");
+const importFontBtn = document.querySelector("#btn-import-font");
+const removeFontBtn = document.querySelector("#btn-remove-font");
 const launchPlaybackModeSelect = document.querySelector("#launch-playback-mode");
 const accessibilityStatusEl = document.querySelector("#accessibility-status");
 const targetPlayerSelect = document.querySelector("#target-player");
@@ -20,17 +22,104 @@ const autoCheckUpdatesInput = document.querySelector("#auto-check-updates");
 const updateStatusEl = document.querySelector("#update-status");
 const checkUpdateBtn = document.querySelector("#btn-check-update");
 const installUpdateBtn = document.querySelector("#btn-install-update");
+const localeSelect = document.querySelector("#ui-locale");
+const floatWidthInput = document.querySelector("#float-width");
+const floatHeightInput = document.querySelector("#float-height");
+const floatWidthLabel = document.querySelector("#float-width-label");
+const floatHeightLabel = document.querySelector("#float-height-label");
+const resetFloatSizeBtn = document.querySelector("#btn-reset-float-size");
 
 const DEFAULT_WINDOW_COLOR = "#24242a";
 const DEFAULT_SPECTRUM_COLOR = "#e60026";
+const DEFAULT_FLOAT_WIDTH = 320;
+const DEFAULT_FLOAT_HEIGHT = 220;
 
 /** Cache of installed players from the main process. */
 let installedPlayers = [];
+/** Latest imported-font catalog from settings. */
+let customFonts = [];
 /** Feature flags supplied by the main process for the current operating system. */
 let platformCapabilities = {
   systemAudioCapture: false,
   accessibilityPlaybackMode: false
 };
+/** Cached update status so locale switches can re-render the message. */
+let lastUpdateStatus = null;
+/** Cached audio status for locale-aware re-render. */
+let lastAudioStatus = null;
+/** Avoid feedback loops while applying float size from IPC. */
+let applyingFloatSize = false;
+
+/**
+ * Updates float size slider ranges, values, and labels.
+ * @param {{
+ *   width?: number,
+ *   expandedHeight?: number,
+ *   minWidth?: number,
+ *   maxWidth?: number,
+ *   minExpandedHeight?: number,
+ *   maxExpandedHeight?: number
+ * }} size
+ */
+function renderFloatSize(size) {
+  if (!size) {
+    return;
+  }
+  applyingFloatSize = true;
+  if (Number.isFinite(size.minWidth) && Number.isFinite(size.maxWidth)) {
+    floatWidthInput.min = String(size.minWidth);
+    floatWidthInput.max = String(size.maxWidth);
+  }
+  if (
+    Number.isFinite(size.minExpandedHeight) &&
+    Number.isFinite(size.maxExpandedHeight)
+  ) {
+    floatHeightInput.min = String(size.minExpandedHeight);
+    floatHeightInput.max = String(size.maxExpandedHeight);
+  }
+  if (Number.isFinite(size.width)) {
+    floatWidthInput.value = String(size.width);
+    floatWidthLabel.textContent = `${size.width}px`;
+  }
+  if (Number.isFinite(size.expandedHeight)) {
+    floatHeightInput.value = String(size.expandedHeight);
+    floatHeightLabel.textContent = `${size.expandedHeight}px`;
+  }
+  applyingFloatSize = false;
+}
+
+/**
+ * Fills the language <select> with system + built-in locale options.
+ * @param {string} selected
+ */
+function populateLocaleOptions(selected) {
+  const options = window.I18N_LOCALE_OPTIONS || [];
+  localeSelect.innerHTML = "";
+  options.forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.nativeLabel;
+    localeSelect.appendChild(option);
+  });
+  const preferred =
+    window.normalizeLocaleSetting(selected) ||
+    window.I18N_DEFAULT_LOCALE_SETTING;
+  localeSelect.value = preferred;
+  if (localeSelect.value !== preferred) {
+    localeSelect.value = window.I18N_DEFAULT_LOCALE_SETTING;
+  }
+}
+
+/**
+ * Applies the settings locale preference and refreshes static DOM strings.
+ * @param {{ locale?: string }} settings
+ */
+function applyUiLocale(settings) {
+  const resolved = window.resolveLocale(settings?.locale);
+  window.setActiveLocale(resolved);
+  window.applyDomI18n();
+  document.title = window.t("settings.title");
+}
 
 /**
  * Fills the target-player <select> with locally installed catalog apps.
@@ -41,7 +130,7 @@ function populateTargetPlayerOptions(selectedId) {
   if (!installedPlayers.length) {
     const option = document.createElement("option");
     option.value = selectedId || "netease";
-    option.textContent = "未检测到已安装的音乐软件";
+    option.textContent = window.t("settings.noPlayers");
     targetPlayerSelect.appendChild(option);
     targetPlayerSelect.disabled = true;
     return;
@@ -71,8 +160,8 @@ function updatePlayerDependentUi(playerId) {
     platformCapabilities.accessibilityPlaybackMode === true;
   playbackModeCard.hidden = !showsPlaybackMode;
   openPlayerLabel.textContent = player
-    ? `打开${player.label}`
-    : "打开所选音乐软件";
+    ? window.t("settings.openPlayerNamed", { name: player.label })
+    : window.t("settings.openPlayer");
 }
 
 /**
@@ -85,10 +174,11 @@ function updatePlayerDependentUi(playerId) {
  * }} status
  */
 function renderUpdateStatus(status) {
+  lastUpdateStatus = status || null;
   const version = status?.currentVersion
     ? `v${status.currentVersion}`
     : "";
-  const message = status?.message || "尚未检查";
+  const message = status?.message || window.t("update.unknown");
   updateStatusEl.textContent = version ? `${message}（${version}）` : message;
   installUpdateBtn.hidden = status?.state !== "ready";
 }
@@ -122,19 +212,65 @@ async function refreshAccessibilityStatus() {
     return;
   }
   const status = await api.getAccessibilityStatus();
-  accessibilityStatusEl.textContent = status?.trusted ? "已授权" : "未授权";
+  accessibilityStatusEl.textContent = status?.trusted
+    ? window.t("settings.axTrusted")
+    : window.t("settings.axDenied");
+  accessibilityStatusEl.removeAttribute("data-i18n");
 }
 
-/** Fills the title-font <select> from shared CJK-capable presets. */
-function populateTitleFontOptions() {
+/** Fills the title-font <select> from presets plus imported fonts. */
+function populateTitleFontOptions(selectedId, importedFonts = []) {
   const presets = window.TITLE_FONT_PRESETS || {};
   titleFontSelect.innerHTML = "";
+
+  const presetGroup = document.createElement("optgroup");
+  presetGroup.label = window.t("settings.fonts.builtin");
   Object.values(presets).forEach((preset) => {
     const option = document.createElement("option");
     option.value = preset.id;
     option.textContent = preset.label;
-    titleFontSelect.appendChild(option);
+    presetGroup.appendChild(option);
   });
+  titleFontSelect.appendChild(presetGroup);
+
+  if (importedFonts.length) {
+    const customGroup = document.createElement("optgroup");
+    customGroup.label = window.t("settings.fonts.imported");
+    importedFonts.forEach((font) => {
+      const option = document.createElement("option");
+      option.value = font.id;
+      option.textContent = font.label;
+      customGroup.appendChild(option);
+    });
+    titleFontSelect.appendChild(customGroup);
+  }
+
+  const preferred = selectedId || "system";
+  titleFontSelect.value = preferred;
+  if (titleFontSelect.value !== preferred) {
+    titleFontSelect.value = "system";
+  }
+  syncRemoveFontButton();
+}
+
+/** Shows the delete button only while an imported font is selected. */
+function syncRemoveFontButton() {
+  const selected = titleFontSelect.value;
+  removeFontBtn.hidden = !customFonts.some((font) => font.id === selected);
+}
+
+/**
+ * Injects @font-face rules for imported fonts into this document.
+ * @param {{ family: string, fileName: string }[]} fonts
+ */
+function applyCustomFontFaces(fonts) {
+  let style = document.getElementById("custom-font-faces");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "custom-font-faces";
+    document.head.appendChild(style);
+  }
+  style.textContent = window.buildCustomFontFaceCss(fonts || []);
 }
 
 /**
@@ -144,7 +280,10 @@ function populateTitleFontOptions() {
  */
 function renderTitleFontPreview(fontId, fontSize) {
   titleFontSizeLabel.textContent = `${fontSize}px`;
-  titleFontPreview.style.fontFamily = window.resolveTitleFontStack(fontId);
+  titleFontPreview.style.fontFamily = window.resolveTitleFontStack(
+    fontId,
+    customFonts
+  );
   titleFontPreview.style.fontSize = `${fontSize}px`;
 }
 
@@ -203,10 +342,12 @@ function applySettingsTheme(settings) {
  *   titleFontSize?: number,
  *   launchPlaybackMode?: string,
  *   targetPlayerId?: string,
- *   autoCheckUpdates?: boolean
+ *   autoCheckUpdates?: boolean,
+ *   locale?: string
  * }} settings
  */
 function renderSettings(settings) {
+  applyUiLocale(settings);
   applySettingsTheme(settings);
   document.querySelector("#always-on-top").checked = Boolean(settings.alwaysOnTop);
   autoCheckUpdatesInput.checked = settings.autoCheckUpdates !== false;
@@ -215,11 +356,15 @@ function renderSettings(settings) {
   spectrumColorInput.value = settings.spectrumColor || DEFAULT_SPECTRUM_COLOR;
   windowColorInput.disabled = Boolean(settings.transparentFloat);
   launchPlaybackModeSelect.value = settings.launchPlaybackMode || "keep";
+  populateLocaleOptions(settings.locale);
 
-  const fontId = window.normalizeTitleFontId(settings.titleFontId);
+  customFonts = window.normalizeCustomFonts(settings.customFonts || []);
+  applyCustomFontFaces(customFonts);
+  const fontId = window.normalizeTitleFontId(settings.titleFontId, customFonts);
   const fontSize = window.clampTitleFontSize(settings.titleFontSize);
-  titleFontSelect.value = fontId;
+  populateTitleFontOptions(fontId, customFonts);
   titleFontSizeInput.value = String(fontSize);
+  titleFontSizeInput.max = String(window.MAX_TITLE_FONT_SIZE || 28);
   renderTitleFontPreview(fontId, fontSize);
 
   const selectedId = settings.targetPlayerId || "netease";
@@ -232,6 +377,16 @@ function renderSettings(settings) {
     }
   }
   updatePlayerDependentUi(targetPlayerSelect.value || selectedId);
+
+  if (lastUpdateStatus) {
+    renderUpdateStatus(lastUpdateStatus);
+  }
+  if (lastAudioStatus) {
+    renderAudioStatus(lastAudioStatus);
+  }
+  if (platformCapabilities.accessibilityPlaybackMode) {
+    refreshAccessibilityStatus();
+  }
 }
 
 /**
@@ -246,30 +401,31 @@ function renderSettings(settings) {
  * }} status
  */
 function renderAudioStatus(status) {
+  lastAudioStatus = status || null;
   const state = status?.state || "unknown";
-  const labels = {
-    granted: "已授权",
-    denied: "未授权",
-    idle: "未采集",
-    unknown: "未知"
-  };
-  audioStatusEl.textContent = labels[state] || labels.unknown;
+  const labelKey = {
+    granted: "audio.state.granted",
+    denied: "audio.state.denied",
+    idle: "audio.state.idle",
+    unsupported: "audio.state.unsupported",
+    unknown: "audio.state.unknown"
+  }[state] || "audio.state.unknown";
+  audioStatusEl.textContent = window.t(labelKey);
   audioStatusEl.className = `status-chip is-${state}`;
 
   if (status?.error) {
-    audioDetailEl.textContent = `采集失败：${status.error}`;
+    audioDetailEl.textContent = window.t("audio.detail.fail", {
+      error: status.error
+    });
   } else if (state === "granted") {
-    audioDetailEl.textContent = "系统音频采集正常，频谱应能随播放跳动。";
+    audioDetailEl.textContent = window.t("audio.detail.ok");
   } else if (status?.openedSettings) {
-    audioDetailEl.textContent =
-      "已打开系统设置。请在「仅系统音频录制」中勾选本应用（或 audiotee）。";
+    audioDetailEl.textContent = window.t("audio.detail.opened");
   } else if (status?.consent && !status?.running) {
-    audioDetailEl.textContent =
-      "已记住授权意向，但采集未在运行。可再点一次启动。";
+    audioDetailEl.textContent = window.t("audio.detail.consent");
   } else {
     audioDetailEl.textContent =
-      status?.hint ||
-      "真实频谱需要「仅系统音频录制」权限。首次点击下方按钮即可。";
+      status?.hint || window.t("audio.detail.need");
   }
 }
 
@@ -279,14 +435,43 @@ async function refreshAudioStatus() {
   renderAudioStatus(status);
 }
 
-populateTitleFontOptions();
-
 document.querySelector("#always-on-top").addEventListener("change", (event) => {
   api.updateSettings({ alwaysOnTop: event.target.checked });
 });
 
 autoCheckUpdatesInput.addEventListener("change", (event) => {
   api.updateSettings({ autoCheckUpdates: event.target.checked });
+});
+
+localeSelect.addEventListener("change", (event) => {
+  api.updateSettings({
+    locale: window.normalizeLocaleSetting(event.target.value)
+  });
+});
+
+floatWidthInput.addEventListener("input", (event) => {
+  if (applyingFloatSize) {
+    return;
+  }
+  const width = Number(event.target.value);
+  floatWidthLabel.textContent = `${width}px`;
+  api.setFloatSize({ width });
+});
+
+floatHeightInput.addEventListener("input", (event) => {
+  if (applyingFloatSize) {
+    return;
+  }
+  const expandedHeight = Number(event.target.value);
+  floatHeightLabel.textContent = `${expandedHeight}px`;
+  api.setFloatSize({ expandedHeight });
+});
+
+resetFloatSizeBtn.addEventListener("click", () => {
+  api.setFloatSize({
+    width: DEFAULT_FLOAT_WIDTH,
+    expandedHeight: DEFAULT_FLOAT_HEIGHT
+  });
 });
 
 checkUpdateBtn.addEventListener("click", async () => {
@@ -320,6 +505,11 @@ spectrumColorInput.addEventListener("input", (event) => {
 });
 
 titleFontSelect.addEventListener("change", (event) => {
+  syncRemoveFontButton();
+  renderTitleFontPreview(
+    event.target.value,
+    window.clampTitleFontSize(titleFontSizeInput.value)
+  );
   api.updateSettings({ titleFontId: event.target.value });
 });
 
@@ -328,6 +518,34 @@ titleFontSizeInput.addEventListener("input", (event) => {
   titleFontSizeLabel.textContent = `${fontSize}px`;
   renderTitleFontPreview(titleFontSelect.value, fontSize);
   api.updateSettings({ titleFontSize: fontSize });
+});
+
+importFontBtn.addEventListener("click", async () => {
+  importFontBtn.disabled = true;
+  try {
+    const result = await api.importFont();
+    if (result?.settings) {
+      renderSettings(result.settings);
+    }
+  } finally {
+    importFontBtn.disabled = false;
+  }
+});
+
+removeFontBtn.addEventListener("click", async () => {
+  const fontId = titleFontSelect.value;
+  if (!customFonts.some((font) => font.id === fontId)) {
+    return;
+  }
+  removeFontBtn.disabled = true;
+  try {
+    const result = await api.removeFont(fontId);
+    if (result?.settings) {
+      renderSettings(result.settings);
+    }
+  } finally {
+    removeFontBtn.disabled = false;
+  }
 });
 
 launchPlaybackModeSelect.addEventListener("change", (event) => {
@@ -365,7 +583,7 @@ document.querySelector("#btn-quit").addEventListener("click", () => {
 
 audioPermissionBtn.addEventListener("click", async () => {
   audioPermissionBtn.disabled = true;
-  audioStatusEl.textContent = "请求中";
+  audioStatusEl.textContent = window.t("audio.detail.requesting");
   audioStatusEl.className = "status-chip";
   try {
     const result = await api.requestAudioPermission();
@@ -375,18 +593,22 @@ audioPermissionBtn.addEventListener("click", async () => {
   }
 });
 
-Promise.all([api.getSettings(), api.getPlatformCapabilities()]).then(
-  async ([settings, capabilities]) => {
-    applyPlatformCapabilities(capabilities);
-    await refreshInstalledPlayers(settings);
-    renderSettings(settings);
-    if (platformCapabilities.systemAudioCapture) {
-      refreshAudioStatus();
-    }
-    if (platformCapabilities.accessibilityPlaybackMode) {
-      refreshAccessibilityStatus();
-    }
+Promise.all([
+  api.getSettings(),
+  api.getPlatformCapabilities(),
+  api.getFloatSize()
+]).then(async ([settings, capabilities, floatSize]) => {
+  applyPlatformCapabilities(capabilities);
+  await refreshInstalledPlayers(settings);
+  renderSettings(settings);
+  renderFloatSize(floatSize);
+  if (platformCapabilities.systemAudioCapture) {
+    refreshAudioStatus();
   }
-);
+  if (platformCapabilities.accessibilityPlaybackMode) {
+    refreshAccessibilityStatus();
+  }
+});
 api.onSettingsChanged(renderSettings);
+api.onFloatSizeChanged(renderFloatSize);
 api.getUpdateStatus().then(renderUpdateStatus);

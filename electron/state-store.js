@@ -4,8 +4,13 @@ const {
   DEFAULT_TITLE_FONT_ID,
   DEFAULT_TITLE_FONT_SIZE,
   normalizeTitleFontId,
-  clampTitleFontSize
+  clampTitleFontSize,
+  normalizeCustomFonts
 } = require("../src/title-fonts");
+const {
+  DEFAULT_LOCALE_SETTING,
+  normalizeLocaleSetting
+} = require("../src/i18n");
 const { normalizeLaunchPlaybackMode } = require("./netease-playback-mode");
 const { normalizeTargetPlayerId } = require("./music-players");
 
@@ -21,10 +26,14 @@ const DEFAULT_SETTINGS = {
   spectrumColor: "#e60026",
   /** Clear float chrome: no panel fill; collapsed shows only title + spectrum. */
   transparentFloat: false,
-  /** Collapsed title font preset id (CJK-capable stacks). */
+  /** Collapsed title font preset or imported font id. */
   titleFontId: DEFAULT_TITLE_FONT_ID,
   /** Collapsed title font size in px. */
   titleFontSize: DEFAULT_TITLE_FONT_SIZE,
+  /** User-imported font catalog (files live under userData/custom-fonts). */
+  customFonts: [],
+  /** UI language preference: system | zh-CN | en | ja. */
+  locale: DEFAULT_LOCALE_SETTING,
   /**
    * On launch, sync NetEase to this mode via Accessibility.
    * `keep` = only detect and mirror UI; otherwise force-switch.
@@ -165,6 +174,7 @@ function readState(filePath) {
  * @param {Record<string, unknown>} settings
  */
 function validateSettings(settings) {
+  const customFonts = normalizeCustomFonts(settings.customFonts);
   return {
     alwaysOnTop:
       typeof settings.alwaysOnTop === "boolean"
@@ -186,8 +196,10 @@ function validateSettings(settings) {
       typeof settings.transparentFloat === "boolean"
         ? settings.transparentFloat
         : DEFAULT_SETTINGS.transparentFloat,
-    titleFontId: normalizeTitleFontId(settings.titleFontId),
+    customFonts,
+    titleFontId: normalizeTitleFontId(settings.titleFontId, customFonts),
     titleFontSize: clampTitleFontSize(settings.titleFontSize),
+    locale: normalizeLocaleSetting(settings.locale),
     launchPlaybackMode: normalizeLaunchPlaybackMode(settings.launchPlaybackMode),
     targetPlayerId: normalizeTargetPlayerId(settings.targetPlayerId),
     autoCheckUpdates:
@@ -225,13 +237,13 @@ function validateFloatSize(size) {
   const expandedHeight = Number(size.expandedHeight);
   return {
     width:
-      Number.isFinite(width) && width >= 260 && width <= 560
+      Number.isFinite(width) && width >= 260 && width <= 720
         ? Math.round(width)
         : DEFAULT_FLOAT_SIZE.width,
     expandedHeight:
       Number.isFinite(expandedHeight) &&
       expandedHeight >= 180 &&
-      expandedHeight <= 480
+      expandedHeight <= 640
         ? Math.round(expandedHeight)
         : DEFAULT_FLOAT_SIZE.expandedHeight
   };

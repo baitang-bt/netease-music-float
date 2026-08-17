@@ -24,16 +24,22 @@ let dragMoved = false;
 let dragStarted = false;
 let dragStartX = 0;
 let dragStartY = 0;
+/** True while the SE-corner resize handle is driving window size. */
+let resizeActive = false;
+let resizeStartX = 0;
+let resizeStartY = 0;
 let expanded = false;
 let collapseTimer = null;
 /** Runs while the expanded chrome fades out, before the window shrinks. */
 let collapseFadeTimer = null;
 /** Latest settings, replayed when expand state changes the effective theme. */
 let lastSettings = null;
+/** Latest Now Playing snapshot, re-rendered after a locale switch. */
+let lastTrack = null;
 /** Optimistic play state until the next MediaRemote snapshot arrives. */
 let optimisticPlaying = null;
 /** Last non-lyric title text for the collapsed/expanded title slot. */
-let trackTitleText = "未在播放";
+let trackTitleText = window.t("float.notPlaying");
 /** Whether the title slot is currently showing a lyric line. */
 let showingLyric = false;
 
@@ -96,7 +102,7 @@ function cancelCollapse() {
 function scheduleCollapse() {
   cancelCollapse();
   collapseTimer = setTimeout(() => {
-    if (!dragActive) {
+    if (!dragActive && !resizeActive) {
       setExpanded(false);
     }
   }, 160);
@@ -119,7 +125,7 @@ function setupClickExpand() {
     }
   });
   appRoot.addEventListener("pointerleave", () => {
-    if (!dragActive) {
+    if (!dragActive && !resizeActive) {
       scheduleCollapse();
     }
   });
@@ -197,6 +203,67 @@ function setupDrag() {
 }
 
 /**
+ * Wires the SE-corner handle so frameless floats can still be stretched.
+ * Collapsed mode only adjusts width; expanded adjusts width and height.
+ */
+function setupResize() {
+  const handle = document.querySelector("#resize-handle");
+  if (!handle) {
+    return;
+  }
+
+  /**
+   * Begins a resize gesture from the corner handle.
+   * @param {PointerEvent} event
+   */
+  function onPointerDown(event) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    resizeActive = true;
+    resizeStartX = event.screenX;
+    resizeStartY = event.screenY;
+    cancelCollapse();
+    appRoot.classList.add("is-resizing");
+    handle.setPointerCapture(event.pointerId);
+    api.resizeStart();
+  }
+
+  /**
+   * Forwards pointer deltas to the main process while resizing.
+   * @param {PointerEvent} event
+   */
+  function onPointerMove(event) {
+    if (!resizeActive) {
+      return;
+    }
+    const deltaX = event.screenX - resizeStartX;
+    const deltaY = expanded ? event.screenY - resizeStartY : 0;
+    api.resizeMove(deltaX, deltaY);
+  }
+
+  /** Ends the resize gesture and restores auto-collapse. */
+  function onPointerUp() {
+    if (!resizeActive) {
+      return;
+    }
+    resizeActive = false;
+    appRoot.classList.remove("is-resizing");
+    api.resizeEnd();
+    if (expanded && !appRoot.matches(":hover")) {
+      scheduleCollapse();
+    }
+  }
+
+  handle.addEventListener("pointerdown", onPointerDown);
+  handle.addEventListener("pointermove", onPointerMove);
+  handle.addEventListener("pointerup", onPointerUp);
+  handle.addEventListener("pointercancel", onPointerUp);
+}
+
+/**
  * Shows or hides the translated lyric layered behind the original line.
  * @param {string|null|undefined} translation
  */
@@ -222,6 +289,7 @@ function showTitleText(text) {
  * @param {object} track
  */
 function renderTrack(track) {
+  lastTrack = track || null;
   const controlsEnabled = track?.isTarget === true;
   els.controls.forEach((button) => {
     button.disabled = !controlsEnabled;
@@ -232,14 +300,15 @@ function renderTrack(track) {
     modeButton.hidden = track?.isNetease !== true;
   }
 
-  const targetLabel = track?.targetPlayerLabel || "所选音乐软件";
+  const targetLabel =
+    track?.targetPlayerLabel || window.t("float.selectedPlayer");
 
   if (!track || track.status === "empty") {
-    trackTitleText = "未在播放";
+    trackTitleText = window.t("float.notPlaying");
     showingLyric = false;
     showTitleText(trackTitleText);
-    els.artist.textContent = `请先在${targetLabel}播放歌曲`;
-    els.statusPill.textContent = "空闲";
+    els.artist.textContent = window.t("float.playIn", { name: targetLabel });
+    els.statusPill.textContent = window.t("status.idle");
     els.statusPill.className = "pill";
     clearArtwork();
     setToggleIcon(false);
@@ -247,28 +316,31 @@ function renderTrack(track) {
   }
 
   if (track.status === "error") {
-    trackTitleText = "媒体状态不可用";
+    trackTitleText = window.t("float.mediaUnavailable");
     showingLyric = false;
     showTitleText(trackTitleText);
-    els.artist.textContent = track.error || "MediaRemote 读取失败";
-    els.statusPill.textContent = "错误";
+    els.artist.textContent =
+      track.error || window.t("float.mediaRemoteError");
+    els.statusPill.textContent = window.t("status.error");
     els.statusPill.className = "pill is-warn";
     clearArtwork();
     return;
   }
 
   if (!track.isTarget) {
-    trackTitleText = track.title || "其它播放器";
+    trackTitleText = track.title || window.t("float.otherPlayer");
     showingLyric = false;
     showTitleText(trackTitleText);
-    els.artist.textContent = `当前 Now Playing 不是${targetLabel}`;
-    els.statusPill.textContent = "未匹配";
+    els.artist.textContent = window.t("float.notTarget", {
+      name: targetLabel
+    });
+    els.statusPill.textContent = window.t("status.unmatched");
     els.statusPill.className = "pill is-warn";
     setArtwork(track.artworkDataUrl);
     return;
   }
 
-  trackTitleText = track.title || "未知曲目";
+  trackTitleText = track.title || window.t("float.unknownTrack");
   if (!showingLyric) {
     showTitleText(trackTitleText);
   }
@@ -278,7 +350,9 @@ function renderTrack(track) {
   if (optimisticPlaying !== null && Boolean(track.playing) === optimisticPlaying) {
     optimisticPlaying = null;
   }
-  els.statusPill.textContent = playing ? "播放中" : "已暂停";
+  els.statusPill.textContent = playing
+    ? window.t("status.playing")
+    : window.t("status.paused");
   els.statusPill.className = playing ? "pill is-live" : "pill";
   setToggleIcon(playing);
   setArtwork(track.artworkDataUrl);
@@ -311,10 +385,26 @@ function renderPlaybackMode(track) {
   }
 
   const meta = {
-    sequential: { icon: "repeat", title: "播放模式：顺序播放", active: false },
-    all: { icon: "repeat", title: "播放模式：列表循环", active: true },
-    one: { icon: "repeat_one", title: "播放模式：单曲循环", active: true },
-    shuffle: { icon: "shuffle", title: "播放模式：随机播放", active: true }
+    sequential: {
+      icon: "repeat",
+      title: window.t("mode.title.sequential"),
+      active: false
+    },
+    all: {
+      icon: "repeat",
+      title: window.t("mode.title.all"),
+      active: true
+    },
+    one: {
+      icon: "repeat_one",
+      title: window.t("mode.title.one"),
+      active: true
+    },
+    shuffle: {
+      icon: "shuffle",
+      title: window.t("mode.title.shuffle"),
+      active: true
+    }
   };
   const view = meta[mode] || meta.sequential;
 
@@ -374,8 +464,7 @@ function setArtwork(dataUrl) {
 function renderAudioHint(payload) {
   if (payload?.error) {
     els.audioHint.hidden = false;
-    els.audioHint.textContent =
-      "需要「仅系统音频录制」权限才能显示真实声浪。系统设置 → 隐私与安全性 → 屏幕与系统音频录制。";
+    els.audioHint.textContent = window.t("float.audioHint");
     return;
   }
   els.audioHint.hidden = true;
@@ -398,7 +487,9 @@ function setupControls() {
     const currentlyPlaying = els.iconToggle.textContent === "pause";
     optimisticPlaying = !currentlyPlaying;
     setToggleIcon(optimisticPlaying);
-    els.statusPill.textContent = optimisticPlaying ? "播放中" : "已暂停";
+    els.statusPill.textContent = optimisticPlaying
+      ? window.t("status.playing")
+      : window.t("status.paused");
     els.statusPill.className = optimisticPlaying ? "pill is-live" : "pill";
     api.togglePlayPause();
   });
@@ -413,9 +504,10 @@ function setupControls() {
     }
     if (result && result.ok === false && result.error) {
       els.audioHint.hidden = false;
-      els.audioHint.textContent = result.accessibility === false
-        ? "切换播放模式需要「辅助功能」权限：系统设置 → 隐私与安全性 → 辅助功能，勾选 NeteaseFloat。"
-        : `播放模式未同步到网易云：${result.error}`;
+      els.audioHint.textContent =
+        result.accessibility === false
+          ? window.t("float.modeNeedsAx")
+          : window.t("float.modeSyncFailed", { error: result.error });
     }
   });
   document.querySelector("#btn-settings").addEventListener("click", () => {
@@ -430,6 +522,7 @@ function setupControls() {
 
 setupClickExpand();
 setupDrag();
+setupResize();
 setupControls();
 /**
  * Shows a timed lyric (with its translation layered behind) or the song title.
@@ -465,10 +558,24 @@ api.onModeError?.((payload) => {
   els.audioHint.hidden = false;
   els.audioHint.textContent =
     payload.accessibility === false
-      ? "开机同步播放模式需要「辅助功能」权限。"
+      ? window.t("float.launchModeNeedsAx")
       : payload.error;
 });
 api.getTrack().then(renderTrack);
+
+/**
+ * Injects @font-face rules for imported fonts into the float document.
+ * @param {{ family: string, fileName: string }[]} fonts
+ */
+function applyCustomFontFaces(fonts) {
+  let style = document.getElementById("custom-font-faces");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "custom-font-faces";
+    document.head.appendChild(style);
+  }
+  style.textContent = window.buildCustomFontFaceCss(fonts || []);
+}
 
 /**
  * Applies window + spectrum colors, transparent mode, and title typography.
@@ -479,11 +586,14 @@ api.getTrack().then(renderTrack);
  *   spectrumColor?: string,
  *   transparentFloat?: boolean,
  *   titleFontId?: string,
- *   titleFontSize?: number
+ *   titleFontSize?: number,
+ *   customFonts?: object[],
+ *   locale?: string
  * }} settings
  */
 function applyTheme(settings) {
   lastSettings = settings;
+  applyUiLocale(settings);
   const windowColor =
     window.normalizeHexColor(settings?.windowColor) || "#24242a";
   const spectrumColor =
@@ -494,7 +604,9 @@ function applyTheme(settings) {
   const visibleSpectrumColor = transparent
     ? spectrumColor
     : window.ensureContrastHex(spectrumColor, windowColor, 2.1);
-  const fontId = window.normalizeTitleFontId(settings?.titleFontId);
+  const customFonts = window.normalizeCustomFonts(settings?.customFonts || []);
+  applyCustomFontFaces(customFonts);
+  const fontId = window.normalizeTitleFontId(settings?.titleFontId, customFonts);
   const fontSize = window.clampTitleFontSize(settings?.titleFontSize);
   const root = document.documentElement;
   const top = windowColor;
@@ -522,7 +634,10 @@ function applyTheme(settings) {
     "--accent-text",
     window.contrastTextColor(visibleSpectrumColor)
   );
-  root.style.setProperty("--title-font", window.resolveTitleFontStack(fontId));
+  root.style.setProperty(
+    "--title-font",
+    window.resolveTitleFontStack(fontId, customFonts)
+  );
   root.style.setProperty("--title-font-size", `${fontSize}px`);
   appRoot.classList.toggle("is-transparent", transparentSetting);
   appRoot.classList.toggle("is-light-theme", contrast.isLight);
@@ -543,6 +658,26 @@ function applyTheme(settings) {
       transparent ? 0.6 : 0.78
     )
   });
+}
+
+/**
+ * Resolves the UI locale from settings and refreshes static + dynamic copy.
+ * @param {{ locale?: string }} settings
+ */
+function applyUiLocale(settings) {
+  const resolved = window.resolveLocale(settings?.locale);
+  const changed = resolved !== window.getActiveLocale();
+  const firstPass = document.documentElement.dataset.i18nReady !== "1";
+  if (!changed && !firstPass) {
+    return;
+  }
+  window.setActiveLocale(resolved);
+  window.applyDomI18n();
+  document.documentElement.dataset.i18nReady = "1";
+  document.title = window.t("app.name");
+  if (lastTrack) {
+    renderTrack(lastTrack);
+  }
 }
 
 api.getSettings().then(applyTheme);
