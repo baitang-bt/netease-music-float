@@ -531,13 +531,16 @@ function applyTheme(settings) {
     // Clear float: bars sit behind the lyric, so they stay a shade softer.
     bottom: window.hexToRgba(
       visibleSpectrumColor,
-      transparent ? 0.32 : 0.36
+      transparent ? 0.26 : 0.36
     ),
+    // Peaks land right behind the text here; heavily lightened peaks turned the
+    // backdrop near-white and swallowed the lyric, so they stay closer to the
+    // chosen color and dimmer than in the panel float.
     top: window.hexToRgba(
       contrast.isLight && !transparent
         ? visibleSpectrumColor
-        : window.lightenHex(visibleSpectrumColor, 0.48),
-      transparent ? 0.8 : 0.78
+        : window.lightenHex(visibleSpectrumColor, transparent ? 0.2 : 0.48),
+      transparent ? 0.6 : 0.78
     )
   });
 }

@@ -201,6 +201,10 @@ function createFloatWindow() {
     skipTaskbar: false,
     hasShadow: false,
     show: false,
+    // A plain window cannot rise above another app's fullscreen Space. The macOS
+    // panel type applies NSWindowStyleMaskNonactivatingPanel, which floats over
+    // fullscreen apps and keeps the Dock icon (unlike switching to an agent app).
+    ...(process.platform === "darwin" ? { type: "panel" } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
