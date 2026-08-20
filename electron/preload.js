@@ -123,7 +123,7 @@ contextBridge.exposeInMainWorld("neteaseFloat", {
   listInstalledPlayers: () => ipcRenderer.invoke("players:list-installed"),
 
   /** Opens a file picker and imports a local title font. */
-  importFont: () => ipcRenderer.invoke("fonts:import"),
+  importFont: (locale) => ipcRenderer.invoke("fonts:import", locale),
 
   /**
    * Removes an imported title font by id.
@@ -180,6 +180,16 @@ contextBridge.exposeInMainWorld("neteaseFloat", {
     const listener = (_event, settings) => callback(settings);
     ipcRenderer.on("settings:changed", listener);
     return () => ipcRenderer.removeListener("settings:changed", listener);
+  },
+
+  /**
+   * Subscribes to lyric-overlay split state so the spectrum window can hide its title.
+   * @param {(payload: { active: boolean }) => void} callback
+   */
+  onLyricOverlay: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("float:lyric-overlay", listener);
+    return () => ipcRenderer.removeListener("float:lyric-overlay", listener);
   },
 
   /** Returns the last auto-update status plus app version. */

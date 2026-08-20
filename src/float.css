@@ -116,7 +116,11 @@ button:active {
   }
 }
 
-/* Collapsed: art + full-bleed spectrum with title behind it. */
+/* Expanded: shrink the native window to the chrome instead of stretching the body. */
+.float:not(.is-collapsed) {
+  height: auto;
+}
+
 .float.is-collapsed {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
@@ -258,6 +262,24 @@ button:active {
     0 2px 7px rgba(0, 0, 0, 0.5);
 }
 
+/* Spectrum window keeps painting bars; the lyric overlay draws the text above the pet. */
+.float.is-lyric-split.is-collapsed .title {
+  visibility: hidden;
+}
+
+.float.is-lyric-overlay {
+  cursor: grab;
+  height: 100%;
+}
+
+.float.is-lyric-overlay .meta {
+  grid-column: 1;
+}
+
+.float.is-lyric-overlay:active {
+  cursor: grabbing;
+}
+
 
 .drag-region {
   display: flex;
@@ -331,9 +353,9 @@ button:active {
   display: grid;
   grid-template-columns: 72px 1fr;
   gap: 12px;
-  align-items: center;
+  align-items: start;
   min-height: 0;
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .artwork {
@@ -399,6 +421,18 @@ button:active {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.font-seg-zh {
+  font-family: var(--title-font-zh, var(--title-font));
+}
+
+.font-seg-en {
+  font-family: var(--title-font-en, var(--title-font));
+}
+
+.font-seg-ja {
+  font-family: var(--title-font-ja, var(--title-font));
 }
 
 .title-translation {
@@ -507,10 +541,10 @@ button:active {
 
 .resize-handle {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 18px;
-  height: 18px;
+  right: 6px;
+  bottom: 6px;
+  width: 16px;
+  height: 16px;
   padding: 0;
   border: 0;
   border-radius: 0 0 var(--radius) 0;
@@ -528,6 +562,20 @@ button:active {
   z-index: 5;
 }
 
+/* Collapsed: anchor the grip to the meta/spectrum cell, not the full window. */
+.float.is-collapsed .resize-handle {
+  grid-column: 2;
+  grid-row: 1;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.float.is-transparent.is-collapsed .resize-handle {
+  grid-column: 1;
+}
+
 .resize-handle:hover,
 .float.is-resizing .resize-handle {
   opacity: 0.95;
@@ -535,4 +583,31 @@ button:active {
 
 .float.is-collapsed .resize-handle {
   opacity: 0.35;
+}
+
+/* Transparent float: hide the grip until the pointer is over the window. */
+.float.is-transparent .resize-handle {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.float.is-transparent:hover .resize-handle,
+.float.is-transparent.is-resizing .resize-handle {
+  pointer-events: auto;
+}
+
+.float.is-transparent:not(.is-collapsed):hover .resize-handle,
+.float.is-transparent:not(.is-collapsed).is-resizing .resize-handle {
+  opacity: 0.55;
+}
+
+.float.is-transparent.is-collapsed:hover .resize-handle,
+.float.is-transparent.is-collapsed.is-resizing .resize-handle {
+  opacity: 0.35;
+}
+
+.float.is-transparent .resize-handle:hover,
+.float.is-transparent.is-resizing .resize-handle {
+  opacity: 0.95;
 }

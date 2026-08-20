@@ -68,12 +68,12 @@
             <label class="setting-row">
               <span class="setting-text">
                 <strong data-i18n="settings.floatHeight">展开高度</strong>
-                <small id="float-height-label">220px</small>
+                <small id="float-height-label">172px</small>
               </span>
               <input
                 id="float-height"
                 type="range"
-                min="180"
+                min="148"
                 max="640"
                 step="4"
                 value="220"
@@ -172,9 +172,21 @@
             </label>
             <label class="setting-row setting-row-stack">
               <span class="setting-text">
-                <strong data-i18n="settings.titleFont">标题字体</strong>
+                <strong data-i18n="settings.titleFontZh">中文标题字体</strong>
               </span>
-              <select id="title-font" class="setting-select"></select>
+              <div id="title-font-zh" class="font-picker-host"></div>
+            </label>
+            <label class="setting-row setting-row-stack">
+              <span class="setting-text">
+                <strong data-i18n="settings.titleFontEn">英文标题字体</strong>
+              </span>
+              <div id="title-font-en" class="font-picker-host"></div>
+            </label>
+            <label class="setting-row setting-row-stack">
+              <span class="setting-text">
+                <strong data-i18n="settings.titleFontJa">日文标题字体</strong>
+              </span>
+              <div id="title-font-ja" class="font-picker-host"></div>
             </label>
             <div class="font-actions">
               <button type="button" id="btn-import-font" class="secondary-button" data-i18n="settings.importFont">
@@ -205,7 +217,7 @@
               />
             </label>
             <p id="title-font-preview" class="font-preview">
-              网易云 · NetEase · こんにちは · ただ在るだけ
+              <span class="font-seg font-seg-zh">网易云</span><span class="font-seg font-seg-en"> · NetEase · </span><span class="font-seg font-seg-ja">こんにちは · ただ在るだけ</span>
             </p>
             <button type="button" id="btn-reset-colors" class="secondary-button" data-i18n="settings.resetColors">
               恢复默认配色
@@ -234,6 +246,8 @@
     </div>
     <script src="./theme-colors.js"></script>
     <script src="./title-fonts.js"></script>
+    <script src="./title-font-apply.js"></script>
+    <script src="./title-font-picker.js"></script>
     <script src="./i18n.js"></script>
     <script src="./settings.js"></script>
   </body>

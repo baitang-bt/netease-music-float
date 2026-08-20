@@ -286,7 +286,7 @@ describe("float size", () => {
   it("falls back when values are outside the supported range", () => {
     assert.deepEqual(
       validateFloatSize({ width: 900, expandedHeight: 50 }),
-      { width: 320, expandedHeight: 220 }
+      { width: 320, expandedHeight: 172 }
     );
   });
 });

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' nf-font:"
+    />
+    <title>网易云浮窗歌词</title>
+    <link rel="stylesheet" href="./float.css" />
+  </head>
+  <body>
+    <div id="app" class="float is-collapsed is-transparent is-lyric-overlay">
+      <div class="meta">
+        <div id="title" class="title">
+          <span class="title-stack">
+            <span id="title-text" class="title-text"></span>
+            <span id="title-translation" class="title-translation" hidden></span>
+          </span>
+        </div>
+      </div>
+    </div>
+    <script src="./theme-colors.js"></script>
+    <script src="./title-fonts.js"></script>
+    <script src="./title-font-apply.js"></script>
+    <script src="./i18n.js"></script>
+    <script src="./apply-float-theme.js"></script>
+    <script src="./lyric-overlay.js"></script>
+  </body>
+</html>

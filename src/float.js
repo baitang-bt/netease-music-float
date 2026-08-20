@@ -42,6 +42,37 @@ let optimisticPlaying = null;
 let trackTitleText = window.t("float.notPlaying");
 /** Whether the title slot is currently showing a lyric line. */
 let showingLyric = false;
+/** Last expanded height pushed to the main process to avoid resize loops. */
+let lastSyncedExpandedHeight = 0;
+
+/**
+ * Resizes the native window to match the expanded chrome height.
+ */
+function syncExpandedWindowHeight() {
+  if (
+    !expanded ||
+    resizeActive ||
+    appRoot.classList.contains("is-collapsed") ||
+    appRoot.classList.contains("is-leaving")
+  ) {
+    return;
+  }
+  const measured = Math.ceil(appRoot.getBoundingClientRect().height);
+  if (!Number.isFinite(measured) || measured <= 0) {
+    return;
+  }
+  if (Math.abs(measured - lastSyncedExpandedHeight) < 2) {
+    return;
+  }
+  lastSyncedExpandedHeight = measured;
+  api.setFloatSize({ expandedHeight: measured });
+}
+
+/** Watches expanded chrome height so lyrics / font changes do not leave a tall gap. */
+const expandedHeightObserver = new ResizeObserver(() => {
+  syncExpandedWindowHeight();
+});
+expandedHeightObserver.observe(appRoot);
 
 const DRAG_THRESHOLD_PX = 5;
 /** Keep in sync with the chrome transition in float.css. */
@@ -83,8 +114,13 @@ function setExpanded(nextExpanded) {
       applyTheme(lastSettings);
     }
     api.setExpanded(true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(syncExpandedWindowHeight);
+    });
     return;
   }
+
+  lastSyncedExpandedHeight = 0;
 
   appRoot.classList.add("is-leaving");
   collapseFadeTimer = setTimeout(commitCollapse, CHROME_FADE_MS);
@@ -269,7 +305,7 @@ function setupResize() {
  */
 function setTitleTranslation(translation) {
   const text = typeof translation === "string" ? translation.trim() : "";
-  els.titleTranslation.textContent = text;
+  window.renderMultilingualText(els.titleTranslation, text);
   els.titleTranslation.hidden = !text;
   els.title.classList.toggle("has-translation", Boolean(text));
 }
@@ -279,7 +315,7 @@ function setTitleTranslation(translation) {
  * @param {string} text
  */
 function showTitleText(text) {
-  els.titleText.textContent = text;
+  window.renderMultilingualText(els.titleText, text);
   els.title.classList.remove("is-lyric");
   setTitleTranslation("");
 }
@@ -536,7 +572,7 @@ setupControls();
 function renderLyric(payload) {
   if (payload?.showLyric && payload.line) {
     showingLyric = true;
-    els.titleText.textContent = payload.line;
+    window.renderMultilingualText(els.titleText, payload.line);
     els.title.classList.add("is-lyric");
     setTitleTranslation(payload.translation);
     return;
@@ -564,20 +600,6 @@ api.onModeError?.((payload) => {
 api.getTrack().then(renderTrack);
 
 /**
- * Injects @font-face rules for imported fonts into the float document.
- * @param {{ family: string, fileName: string }[]} fonts
- */
-function applyCustomFontFaces(fonts) {
-  let style = document.getElementById("custom-font-faces");
-  if (!style) {
-    style = document.createElement("style");
-    style.id = "custom-font-faces";
-    document.head.appendChild(style);
-  }
-  style.textContent = window.buildCustomFontFaceCss(fonts || []);
-}
-
-/**
  * Applies window + spectrum colors, transparent mode, and title typography.
  * Transparent styling is limited to the collapsed float: once expanded the panel
  * looks exactly like the opaque mode, so the spectrum follows the same rule.
@@ -594,63 +616,27 @@ function applyCustomFontFaces(fonts) {
 function applyTheme(settings) {
   lastSettings = settings;
   applyUiLocale(settings);
+  const { transparent } = window.applyFloatDocumentTheme(
+    document.documentElement,
+    appRoot,
+    settings,
+    { expanded }
+  );
   const windowColor =
     window.normalizeHexColor(settings?.windowColor) || "#24242a";
   const spectrumColor =
     window.normalizeHexColor(settings?.spectrumColor) || "#e60026";
-  const transparentSetting = Boolean(settings?.transparentFloat);
-  const transparent = transparentSetting && !expanded;
   const contrast = window.contrastTheme(windowColor);
   const visibleSpectrumColor = transparent
     ? spectrumColor
     : window.ensureContrastHex(spectrumColor, windowColor, 2.1);
-  const customFonts = window.normalizeCustomFonts(settings?.customFonts || []);
-  applyCustomFontFaces(customFonts);
-  const fontId = window.normalizeTitleFontId(settings?.titleFontId, customFonts);
-  const fontSize = window.clampTitleFontSize(settings?.titleFontSize);
-  const root = document.documentElement;
-  const top = windowColor;
-  const bottom = window.darkenHex(windowColor, contrast.isLight ? 0.15 : 0.35);
-  root.style.setProperty("--accent", visibleSpectrumColor);
-  root.style.setProperty("--accent-glow", window.hexToRgba(spectrumColor, 0.22));
-  root.style.setProperty("--window-top", window.hexToRgba(top, 0.92));
-  root.style.setProperty("--window-bottom", window.hexToRgba(bottom, 0.78));
-  root.style.setProperty("--bg", window.hexToRgba(bottom, 0.78));
-  root.style.setProperty("--fg", contrast.foreground);
-  root.style.setProperty("--muted", contrast.muted);
-  root.style.setProperty("--title-color", contrast.title);
-  root.style.setProperty("--lyric-color", contrast.lyric);
-  root.style.setProperty(
-    "--lyric-translation-color",
-    contrast.lyricTranslation
-  );
-  // Halo painted in the panel color so the top line stays legible on overlap.
-  root.style.setProperty("--title-halo", window.hexToRgba(bottom, 0.92));
-  root.style.setProperty("--line", contrast.line);
-  root.style.setProperty("--surface", contrast.surface);
-  root.style.setProperty("--surface-hover", contrast.surfaceHover);
-  root.style.setProperty("--contrast-shadow", contrast.shadow);
-  root.style.setProperty(
-    "--accent-text",
-    window.contrastTextColor(visibleSpectrumColor)
-  );
-  root.style.setProperty(
-    "--title-font",
-    window.resolveTitleFontStack(fontId, customFonts)
-  );
-  root.style.setProperty("--title-font-size", `${fontSize}px`);
-  appRoot.classList.toggle("is-transparent", transparentSetting);
-  appRoot.classList.toggle("is-light-theme", contrast.isLight);
   spectrum.setMirrored(transparent);
   spectrum.setColors({
-    // Clear float: bars sit behind the lyric, so they stay a shade softer.
+    // Clear float: bars sit behind the lyric overlay / pet, so they stay a shade softer.
     bottom: window.hexToRgba(
       visibleSpectrumColor,
       transparent ? 0.26 : 0.36
     ),
-    // Peaks land right behind the text here; heavily lightened peaks turned the
-    // backdrop near-white and swallowed the lyric, so they stay closer to the
-    // chosen color and dimmer than in the panel float.
     top: window.hexToRgba(
       contrast.isLight && !transparent
         ? visibleSpectrumColor
@@ -682,3 +668,6 @@ function applyUiLocale(settings) {
 
 api.getSettings().then(applyTheme);
 api.onSettingsChanged(applyTheme);
+api.onLyricOverlay((payload) => {
+  appRoot.classList.toggle("is-lyric-split", Boolean(payload?.active));
+});

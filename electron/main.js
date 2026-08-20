@@ -31,6 +31,11 @@ const {
   isAccessibilityTrusted
 } = require("./netease-playback-mode");
 const { createLyricsController } = require("./netease-lyrics");
+const {
+  createLyricOverlayController,
+  applyWindowStackLevel,
+  FLOAT_ALWAYS_ON_TOP_LEVEL
+} = require("./lyric-overlay");
 const { createAutoUpdater } = require("./auto-update");
 const {
   importCustomFont,
@@ -60,10 +65,10 @@ protocol.registerSchemesAsPrivileged([
 
 const FLOAT_WIDTH_DEFAULT = 320;
 const FLOAT_HEIGHT_COLLAPSED = 64;
-const FLOAT_HEIGHT_EXPANDED_DEFAULT = 220;
+const FLOAT_HEIGHT_EXPANDED_DEFAULT = 172;
 const FLOAT_MIN_WIDTH = 260;
 const FLOAT_MAX_WIDTH = 720;
-const FLOAT_MIN_EXPANDED_HEIGHT = 180;
+const FLOAT_MIN_EXPANDED_HEIGHT = 148;
 const FLOAT_MAX_EXPANDED_HEIGHT = 640;
 /** Matches the AppKit frame animation so size limits are restored after it. */
 const FLOAT_RESIZE_ANIMATION_MS = 260;
@@ -105,6 +110,7 @@ let knownPlaybackMode = null;
 /** Ensures launch detect / auto-switch runs once per app session. */
 let launchPlaybackModeSynced = false;
 let lyricsController = null;
+let lyricOverlay = null;
 let autoUpdaterController = null;
 /** Last auto-update status payload for Settings / float hints. */
 let latestUpdateStatus = {
@@ -168,7 +174,9 @@ function setFloatExpanded(expanded) {
   floatConstraintTimer = setTimeout(() => {
     floatBoundsAnimating = false;
     applyFloatSizeConstraints();
+    lyricOverlay?.syncBounds();
   }, FLOAT_RESIZE_ANIMATION_MS);
+  lyricOverlay?.ensure();
 }
 
 /** Persists the current expanded float size after the user resizes. */
@@ -332,6 +340,7 @@ function createFloatWindow() {
   floatWindow.loadFile(path.join(__dirname, "..", "src", "index.html"));
   floatWindow.once("ready-to-show", () => {
     floatWindow.show();
+    lyricOverlay?.ensure();
   });
   floatWindow.on("show", () => {
     applyFullScreenVisibility();
@@ -341,10 +350,15 @@ function createFloatWindow() {
     // line for the current playback position so launch starts in sync.
     lyricsController?.resync(latestTrack);
   });
+  floatWindow.on("move", () => {
+    lyricOverlay?.syncBounds();
+  });
   floatWindow.on("resized", () => {
     persistFloatSizeFromWindow();
+    lyricOverlay?.syncBounds();
   });
   floatWindow.on("closed", () => {
+    lyricOverlay?.destroy();
     floatWindow = null;
     floatExpanded = false;
   });
@@ -589,25 +603,20 @@ function toggleSettingsWindow() {
 }
 
 /**
- * Applies always-on-top and keeps the float visible on every Space, including
- * other apps' fullscreen Spaces (screen-saver level + fullscreen-auxiliary).
+ * Applies always-on-top. Transparent collapsed mode splits lyrics into a higher
+ * overlay so a desktop pet can sit on the spectrum midline between the two layers.
  * @param {boolean} alwaysOnTop
  */
 function applyAlwaysOnTop(alwaysOnTop) {
-  if (!floatWindow || floatWindow.isDestroyed()) {
+  if (lyricOverlay) {
+    lyricOverlay.ensure();
     return;
   }
-  if (alwaysOnTop) {
-    if (process.platform === "darwin") {
-      floatWindow.setAlwaysOnTop(true, "screen-saver");
-    } else {
-      floatWindow.setAlwaysOnTop(true);
-    }
-  } else {
-    floatWindow.setAlwaysOnTop(false);
-  }
-  // setAlwaysOnTop resets macOS collection behavior, so re-apply it afterwards.
-  applyFullScreenVisibility();
+  applyWindowStackLevel(
+    floatWindow,
+    alwaysOnTop,
+    FLOAT_ALWAYS_ON_TOP_LEVEL
+  );
 }
 
 /** Joins all Spaces and other apps' fullscreen windows without hiding the Dock icon. */
@@ -629,6 +638,7 @@ function broadcastSettings(settings) {
   if (floatWindow && !floatWindow.isDestroyed()) {
     floatWindow.webContents.send("settings:changed", settings);
   }
+  lyricOverlay?.send("settings:changed", settings);
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.webContents.send("settings:changed", settings);
   }
@@ -643,6 +653,7 @@ function broadcastTrack(track) {
   if (floatWindow && !floatWindow.isDestroyed()) {
     floatWindow.webContents.send("media:track", latestTrack);
   }
+  lyricOverlay?.send("media:track", latestTrack);
 }
 
 /**
@@ -704,6 +715,7 @@ function broadcastLyric(payload) {
   if (floatWindow && !floatWindow.isDestroyed()) {
     floatWindow.webContents.send("media:lyric", payload);
   }
+  lyricOverlay?.send("media:lyric", payload);
 }
 
 /**
@@ -873,17 +885,27 @@ function registerIpc() {
 
   /**
    * Imports a local font file into the userData catalog and selects it.
+   * @param {"zh"|"en"|"ja"} [locale]
    */
-  ipcMain.handle("fonts:import", async () => {
+  ipcMain.handle("fonts:import", async (_event, locale = "zh") => {
     const result = await importCustomFont(settingsWindow);
     if (!result.ok || !result.font) {
       return result;
     }
-    const current = stateStore.getSettings().customFonts || [];
-    const customFonts = [...current, result.font];
+    const current = stateStore.getSettings();
+    const customFonts = [...(current.customFonts || []), result.font];
+    const targetLocale =
+      locale === "en" || locale === "ja" || locale === "zh" ? locale : "zh";
+    const localeKey =
+      targetLocale === "en"
+        ? "titleFontIdEn"
+        : targetLocale === "ja"
+          ? "titleFontIdJa"
+          : "titleFontIdZh";
     const settings = stateStore.updateSettings({
       customFonts,
-      titleFontId: result.font.id
+      [localeKey]: result.font.id,
+      ...(localeKey === "titleFontIdZh" ? { titleFontId: result.font.id } : {})
     });
     broadcastSettings(settings);
     return { ok: true, font: result.font, settings };
@@ -903,9 +925,14 @@ function registerIpc() {
     const customFonts = (current.customFonts || []).filter(
       (font) => font.id !== fontId
     );
-    const titleFontId =
-      current.titleFontId === fontId ? "system" : current.titleFontId;
-    const settings = stateStore.updateSettings({ customFonts, titleFontId });
+    const fallback = (value) => (value === fontId ? "system" : value);
+    const settings = stateStore.updateSettings({
+      customFonts,
+      titleFontId: fallback(current.titleFontId),
+      titleFontIdZh: fallback(current.titleFontIdZh),
+      titleFontIdEn: fallback(current.titleFontIdEn),
+      titleFontIdJa: fallback(current.titleFontIdJa)
+    });
     broadcastSettings(settings);
     return { ok: true, settings };
   });
@@ -1266,6 +1293,16 @@ app.whenReady().then(async () => {
 
   registerIpc();
   syncAppLocale();
+  lyricOverlay = createLyricOverlayController({
+    getFloatWindow: () => floatWindow,
+    getSettings: () => stateStore.getSettings(),
+    isExpanded: () => floatExpanded,
+    onOverlayReady: () => {
+      lyricOverlay.send("settings:changed", stateStore.getSettings());
+      lyricOverlay.send("media:track", latestTrack);
+      lyricsController?.resync(latestTrack);
+    }
+  });
   createTray();
   createFloatWindow();
   mediaController.start();
@@ -1323,6 +1360,7 @@ app.on("before-quit", (event) => {
     try {
       await mediaController?.stop();
       lyricsController?.stop();
+      lyricOverlay?.destroy();
       if (silenceTimer) {
         clearInterval(silenceTimer);
         silenceTimer = null;

@@ -1,6 +1,6 @@
 {
   "name": "netease-music-float",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "Floating Now Playing widget for macOS and Windows music players.",
   "author": "baitang-bt",
@@ -16,7 +16,7 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "node scripts/start-electron.js",
-    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/state-store.js && node --check electron/media-controller.js && node --check electron/media-remote.js && node --check electron/windows-media-controller.js && node --check electron/music-players.js && node --check electron/auto-update.js && node --check electron/netease-app.js && node --check electron/netease-playback-mode.js && node --check electron/netease-lyrics.js && node --check electron/audio-capture.js && node --check electron/audio-permission.js && node --check electron/custom-fonts.js && node --check electron/fft.js && node --check electron/netease-identity.js && node --check electron/paths.js && node --check src/i18n.js && node --check src/float.js && node --check src/spectrum.js && node --check src/theme-colors.js && node --check src/title-fonts.js && node --check src/settings.js && node --check scripts/after-pack.js && node --check scripts/start-electron.js && node --test test/*.test.js",
+    "check": "node --check electron/main.js && node --check electron/preload.js && node --check electron/state-store.js && node --check electron/media-controller.js && node --check electron/media-remote.js && node --check electron/windows-media-controller.js && node --check electron/music-players.js && node --check electron/auto-update.js && node --check electron/netease-app.js && node --check electron/netease-playback-mode.js && node --check electron/netease-lyrics.js && node --check electron/netease-song-id.js && node --check electron/lyric-overlay.js && node --check electron/audio-capture.js && node --check electron/audio-permission.js && node --check electron/custom-fonts.js && node --check electron/fft.js && node --check electron/netease-identity.js && node --check electron/paths.js && node --check src/i18n.js && node --check src/float.js && node --check src/lyric-overlay.js && node --check src/apply-float-theme.js && node --check src/title-font-apply.js && node --check src/title-font-picker.js && node --check src/spectrum.js && node --check src/theme-colors.js && node --check src/title-fonts.js && node --check src/settings.js && node --check scripts/after-pack.js && node --check scripts/start-electron.js && node --test test/*.test.js",
     "sign:mac": "bash scripts/sign-app.sh",
     "dist:mac": "bash scripts/ensure-signing-identity.sh && NETEASEFLOAT_SIGN_IDENTITY=\"NeteaseFloat Local\" CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac -c.electronDist=node_modules/electron/dist",
     "dist:win": "electron-builder --win nsis --x64",

@@ -6,7 +6,15 @@ const audioPermissionBtn = document.querySelector("#btn-audio-permission");
 const windowColorInput = document.querySelector("#window-color");
 const spectrumColorInput = document.querySelector("#spectrum-color");
 const transparentFloatInput = document.querySelector("#transparent-float");
-const titleFontSelect = document.querySelector("#title-font");
+const titleFontPickerRoots = {
+  zh: document.querySelector("#title-font-zh"),
+  en: document.querySelector("#title-font-en"),
+  ja: document.querySelector("#title-font-ja")
+};
+/** @type {Record<"zh"|"en"|"ja", { getValue: () => string }|null>} */
+const titleFontPickers = { zh: null, en: null, ja: null };
+/** Tracks which locale picker should receive the next imported font. */
+let activeTitleFontLocale = "zh";
 const titleFontSizeInput = document.querySelector("#title-font-size");
 const titleFontSizeLabel = document.querySelector("#title-font-size-label");
 const titleFontPreview = document.querySelector("#title-font-preview");
@@ -32,7 +40,7 @@ const resetFloatSizeBtn = document.querySelector("#btn-reset-float-size");
 const DEFAULT_WINDOW_COLOR = "#24242a";
 const DEFAULT_SPECTRUM_COLOR = "#e60026";
 const DEFAULT_FLOAT_WIDTH = 320;
-const DEFAULT_FLOAT_HEIGHT = 220;
+const DEFAULT_FLOAT_HEIGHT = 172;
 
 /** Cache of installed players from the main process. */
 let installedPlayers = [];
@@ -218,45 +226,56 @@ async function refreshAccessibilityStatus() {
   accessibilityStatusEl.removeAttribute("data-i18n");
 }
 
-/** Fills the title-font <select> from presets plus imported fonts. */
-function populateTitleFontOptions(selectedId, importedFonts = []) {
-  const presets = window.TITLE_FONT_PRESETS || {};
-  titleFontSelect.innerHTML = "";
-
-  const presetGroup = document.createElement("optgroup");
-  presetGroup.label = window.t("settings.fonts.builtin");
-  Object.values(presets).forEach((preset) => {
-    const option = document.createElement("option");
-    option.value = preset.id;
-    option.textContent = preset.label;
-    presetGroup.appendChild(option);
-  });
-  titleFontSelect.appendChild(presetGroup);
-
-  if (importedFonts.length) {
-    const customGroup = document.createElement("optgroup");
-    customGroup.label = window.t("settings.fonts.imported");
-    importedFonts.forEach((font) => {
-      const option = document.createElement("option");
-      option.value = font.id;
-      option.textContent = font.label;
-      customGroup.appendChild(option);
-    });
-    titleFontSelect.appendChild(customGroup);
-  }
-
-  const preferred = selectedId || "system";
-  titleFontSelect.value = preferred;
-  if (titleFontSelect.value !== preferred) {
-    titleFontSelect.value = "system";
-  }
-  syncRemoveFontButton();
+/** Shows the delete button only while an imported font is selected anywhere. */
+function syncRemoveFontButton() {
+  const selectedIds = (window.TITLE_FONT_LOCALES || ["zh", "en", "ja"]).map(
+    (locale) => titleFontPickers[locale]?.getValue?.() || ""
+  );
+  removeFontBtn.hidden = !selectedIds.some((fontId) =>
+    customFonts.some((font) => font.id === fontId)
+  );
 }
 
-/** Shows the delete button only while an imported font is selected. */
-function syncRemoveFontButton() {
-  const selected = titleFontSelect.value;
-  removeFontBtn.hidden = !customFonts.some((font) => font.id === selected);
+/**
+ * Mounts or refreshes all locale font pickers.
+ * @param {{ zh: string, en: string, ja: string }} fontIds
+ * @param {{ id: string, label: string, family: string, fileName: string }[]} importedFonts
+ */
+function mountTitleFontPickers(fontIds, importedFonts = []) {
+  (window.TITLE_FONT_LOCALES || ["zh", "en", "ja"]).forEach((locale) => {
+    const root = titleFontPickerRoots[locale];
+    if (!root) {
+      return;
+    }
+    titleFontPickers[locale] = window.mountTitleFontPicker(root, {
+      locale,
+      selectedId: fontIds[locale],
+      customFonts: importedFonts,
+      onChange: (fontId) => {
+        activeTitleFontLocale = locale;
+        fontIds[locale] = fontId;
+        syncRemoveFontButton();
+        renderTitleFontPreview(
+          fontIds,
+          window.clampTitleFontSize(titleFontSizeInput.value)
+        );
+        const key =
+          locale === "zh"
+            ? "titleFontIdZh"
+            : locale === "en"
+              ? "titleFontIdEn"
+              : "titleFontIdJa";
+        api.updateSettings({
+          [key]: fontId,
+          titleFontId: locale === "zh" ? fontId : fontIds.zh
+        });
+      }
+    });
+    root.addEventListener("pointerdown", () => {
+      activeTitleFontLocale = locale;
+    });
+  });
+  syncRemoveFontButton();
 }
 
 /**
@@ -275,16 +294,29 @@ function applyCustomFontFaces(fonts) {
 
 /**
  * Updates the live title font preview label and sample text.
- * @param {string} fontId
+ * @param {{ zh: string, en: string, ja: string }} fontIds
  * @param {number} fontSize
  */
-function renderTitleFontPreview(fontId, fontSize) {
+function renderTitleFontPreview(fontIds, fontSize) {
   titleFontSizeLabel.textContent = `${fontSize}px`;
-  titleFontPreview.style.fontFamily = window.resolveTitleFontStack(
-    fontId,
+  titleFontPreview.style.fontSize = `${fontSize}px`;
+  const stacks = window.resolveTitleFontStacks(
+    {
+      titleFontIdZh: fontIds.zh,
+      titleFontIdEn: fontIds.en,
+      titleFontIdJa: fontIds.ja
+    },
     customFonts
   );
-  titleFontPreview.style.fontSize = `${fontSize}px`;
+  titleFontPreview.querySelectorAll(".font-seg-zh").forEach((node) => {
+    node.style.fontFamily = stacks.zh;
+  });
+  titleFontPreview.querySelectorAll(".font-seg-en").forEach((node) => {
+    node.style.fontFamily = stacks.en;
+  });
+  titleFontPreview.querySelectorAll(".font-seg-ja").forEach((node) => {
+    node.style.fontFamily = stacks.ja;
+  });
 }
 
 /**
@@ -360,12 +392,12 @@ function renderSettings(settings) {
 
   customFonts = window.normalizeCustomFonts(settings.customFonts || []);
   applyCustomFontFaces(customFonts);
-  const fontId = window.normalizeTitleFontId(settings.titleFontId, customFonts);
+  const fontIds = window.normalizeTitleFontIds(settings, customFonts);
   const fontSize = window.clampTitleFontSize(settings.titleFontSize);
-  populateTitleFontOptions(fontId, customFonts);
+  mountTitleFontPickers(fontIds, customFonts);
   titleFontSizeInput.value = String(fontSize);
   titleFontSizeInput.max = String(window.MAX_TITLE_FONT_SIZE || 28);
-  renderTitleFontPreview(fontId, fontSize);
+  renderTitleFontPreview(fontIds, fontSize);
 
   const selectedId = settings.targetPlayerId || "netease";
   if (targetPlayerSelect.options.length) {
@@ -504,26 +536,27 @@ spectrumColorInput.addEventListener("input", (event) => {
   api.updateSettings({ spectrumColor: event.target.value });
 });
 
-titleFontSelect.addEventListener("change", (event) => {
-  syncRemoveFontButton();
-  renderTitleFontPreview(
-    event.target.value,
-    window.clampTitleFontSize(titleFontSizeInput.value)
-  );
-  api.updateSettings({ titleFontId: event.target.value });
-});
-
 titleFontSizeInput.addEventListener("input", (event) => {
   const fontSize = window.clampTitleFontSize(event.target.value);
   titleFontSizeLabel.textContent = `${fontSize}px`;
-  renderTitleFontPreview(titleFontSelect.value, fontSize);
+  renderTitleFontPreview(
+    window.normalizeTitleFontIds(
+      {
+        titleFontIdZh: titleFontPickers.zh?.getValue?.(),
+        titleFontIdEn: titleFontPickers.en?.getValue?.(),
+        titleFontIdJa: titleFontPickers.ja?.getValue?.()
+      },
+      customFonts
+    ),
+    fontSize
+  );
   api.updateSettings({ titleFontSize: fontSize });
 });
 
 importFontBtn.addEventListener("click", async () => {
   importFontBtn.disabled = true;
   try {
-    const result = await api.importFont();
+    const result = await api.importFont(activeTitleFontLocale);
     if (result?.settings) {
       renderSettings(result.settings);
     }
@@ -533,8 +566,11 @@ importFontBtn.addEventListener("click", async () => {
 });
 
 removeFontBtn.addEventListener("click", async () => {
-  const fontId = titleFontSelect.value;
-  if (!customFonts.some((font) => font.id === fontId)) {
+  const selectedIds = (window.TITLE_FONT_LOCALES || ["zh", "en", "ja"]).map(
+    (locale) => titleFontPickers[locale]?.getValue?.() || ""
+  );
+  const fontId = selectedIds.find((id) => customFonts.some((font) => font.id === id));
+  if (!fontId) {
     return;
   }
   removeFontBtn.disabled = true;
@@ -569,6 +605,9 @@ document.querySelector("#btn-reset-colors").addEventListener("click", () => {
     spectrumColor: DEFAULT_SPECTRUM_COLOR,
     transparentFloat: false,
     titleFontId: window.DEFAULT_TITLE_FONT_ID,
+    titleFontIdZh: window.DEFAULT_TITLE_FONT_ID,
+    titleFontIdEn: window.DEFAULT_TITLE_FONT_ID,
+    titleFontIdJa: window.DEFAULT_TITLE_FONT_ID,
     titleFontSize: window.DEFAULT_TITLE_FONT_SIZE
   });
 });

@@ -1,4 +1,5 @@
 const https = require("node:https");
+const { resolveSongId } = require("./netease-song-id");
 
 const SEARCH_HOST = "music.163.com";
 const USER_AGENT =
@@ -49,6 +50,31 @@ function getJson(pathWithQuery) {
 }
 
 /**
+ * Converts a NetEase LRC timestamp match into seconds.
+ * Supports [mm:ss], [mm:ss.xx], and [mm:ss:xx] (colon hundredths).
+ * @param {RegExpMatchArray} match
+ */
+function lrcMatchToSeconds(match) {
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+    return null;
+  }
+  const dotted = match[3];
+  const colonFrac = match[4];
+  let fraction = 0;
+  if (dotted) {
+    fraction = Number(`0.${dotted}`);
+  } else if (colonFrac) {
+    fraction = Number(colonFrac) / 10 ** colonFrac.length;
+  }
+  if (!Number.isFinite(fraction)) {
+    return null;
+  }
+  return minutes * 60 + seconds + fraction;
+}
+
+/**
  * Parses LRC text into timed lines (seconds + lyric text).
  * @param {string} lrc
  * @returns {{ time: number, text: string }[]}
@@ -58,7 +84,7 @@ function parseLrc(lrc) {
     return [];
   }
   const lines = [];
-  const re = /\[(\d{1,3}):(\d{1,2}(?:\.\d+)?)\]/g;
+  const re = /\[(\d{1,3}):(\d{1,2})(?:\.(\d{1,3})|:(\d{1,3}))?\]/g;
   for (const raw of lrc.split(/\r?\n/)) {
     const text = raw.replace(re, "").trim();
     re.lastIndex = 0;
@@ -67,10 +93,9 @@ function parseLrc(lrc) {
       continue;
     }
     while (match) {
-      const minutes = Number(match[1]);
-      const seconds = Number(match[2]);
-      if (Number.isFinite(minutes) && Number.isFinite(seconds)) {
-        lines.push({ time: minutes * 60 + seconds, text });
+      const time = lrcMatchToSeconds(match);
+      if (time !== null) {
+        lines.push({ time, text });
       }
       match = re.exec(raw);
     }
@@ -123,67 +148,6 @@ function lyricEntryAt(lines, elapsedSec) {
  */
 function lyricLineAt(lines, elapsedSec) {
   return lyricEntryAt(lines, elapsedSec)?.text || "";
-}
-
-/**
- * Scores a search hit against Now Playing title/artist.
- * @param {{ name?: string, artists?: { name?: string }[] }} song
- * @param {string} title
- * @param {string} artist
- */
-function scoreSongMatch(song, title, artist) {
-  const name = String(song.name || "").toLowerCase();
-  const wantTitle = String(title || "").toLowerCase();
-  const artists = (song.artists || [])
-    .map((a) => String(a.name || "").toLowerCase())
-    .join(" / ");
-  const wantArtist = String(artist || "").toLowerCase();
-  let score = 0;
-  if (name === wantTitle) {
-    score += 8;
-  } else if (name.includes(wantTitle) || wantTitle.includes(name)) {
-    score += 4;
-  }
-  if (wantArtist) {
-    const parts = wantArtist.split(/[\/,&，、]/).map((p) => p.trim()).filter(Boolean);
-    for (const part of parts) {
-      if (artists.includes(part)) {
-        score += 3;
-      }
-    }
-  }
-  return score;
-}
-
-/**
- * Resolves a NetEase song id for a title/artist pair via public search API.
- * @param {string} title
- * @param {string} artist
- * @returns {Promise<number|null>}
- */
-async function searchSongId(title, artist) {
-  if (!title) {
-    return null;
-  }
-  const query = encodeURIComponent(`${title} ${artist || ""}`.trim());
-  const data = await getJson(
-    `/api/search/get?s=${query}&type=1&limit=10&offset=0`
-  );
-  const songs = data?.result?.songs;
-  if (!Array.isArray(songs) || !songs.length) {
-    return null;
-  }
-  let best = songs[0];
-  let bestScore = -1;
-  for (const song of songs) {
-    const score = scoreSongMatch(song, title, artist);
-    if (score > bestScore) {
-      best = song;
-      bestScore = score;
-    }
-  }
-  const id = Number(best?.id);
-  return Number.isFinite(id) ? id : null;
 }
 
 /**
@@ -249,15 +213,18 @@ async function fetchLyricPayload(songId) {
 
 /**
  * Loads timed lyrics for a Now Playing title/artist (null when unavailable).
- * @param {{ title?: string|null, artist?: string|null }} track
+ * @param {{
+ *   title?: string|null,
+ *   artist?: string|null,
+ *   album?: string|null,
+ *   isNetease?: boolean
+ * }} track
  */
 async function loadLyricsForTrack(track) {
-  const title = track?.title;
-  const artist = track?.artist;
-  if (!title) {
+  if (!track?.title) {
     return null;
   }
-  const songId = await searchSongId(title, artist || "");
+  const songId = await resolveSongId(track);
   if (!songId) {
     return null;
   }
@@ -354,7 +321,7 @@ function createLyricsController(options) {
       return;
     }
 
-    const key = `${track.title}|${track.artist || ""}`;
+    const key = `${track.title}|${track.artist || ""}|${track.album || ""}`;
     // Same identity: reuse cache, or keep the in-flight fetch (do not bump
     // loadToken — artwork/play-state rebinds would otherwise drop the response).
     if (key === cacheKey) {
@@ -457,7 +424,6 @@ module.exports = {
   lyricEntryAt,
   attachTranslations,
   isMetaLyricLine,
-  searchSongId,
   fetchLyricPayload,
   loadLyricsForTrack,
   createLyricsController,

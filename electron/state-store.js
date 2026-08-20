@@ -3,7 +3,7 @@ const path = require("node:path");
 const {
   DEFAULT_TITLE_FONT_ID,
   DEFAULT_TITLE_FONT_SIZE,
-  normalizeTitleFontId,
+  normalizeTitleFontIds,
   clampTitleFontSize,
   normalizeCustomFonts
 } = require("../src/title-fonts");
@@ -26,8 +26,12 @@ const DEFAULT_SETTINGS = {
   spectrumColor: "#e60026",
   /** Clear float chrome: no panel fill; collapsed shows only title + spectrum. */
   transparentFloat: false,
-  /** Collapsed title font preset or imported font id. */
+  /** Collapsed title font preset or imported font id (legacy, mirrors zh). */
   titleFontId: DEFAULT_TITLE_FONT_ID,
+  /** Per-locale title font presets or imported font ids. */
+  titleFontIdZh: DEFAULT_TITLE_FONT_ID,
+  titleFontIdEn: DEFAULT_TITLE_FONT_ID,
+  titleFontIdJa: DEFAULT_TITLE_FONT_ID,
   /** Collapsed title font size in px. */
   titleFontSize: DEFAULT_TITLE_FONT_SIZE,
   /** User-imported font catalog (files live under userData/custom-fonts). */
@@ -47,7 +51,7 @@ const DEFAULT_SETTINGS = {
 
 const DEFAULT_FLOAT_SIZE = {
   width: 320,
-  expandedHeight: 220
+  expandedHeight: 172
 };
 
 /**
@@ -175,6 +179,7 @@ function readState(filePath) {
  */
 function validateSettings(settings) {
   const customFonts = normalizeCustomFonts(settings.customFonts);
+  const titleFontIds = normalizeTitleFontIds(settings, customFonts);
   return {
     alwaysOnTop:
       typeof settings.alwaysOnTop === "boolean"
@@ -197,7 +202,10 @@ function validateSettings(settings) {
         ? settings.transparentFloat
         : DEFAULT_SETTINGS.transparentFloat,
     customFonts,
-    titleFontId: normalizeTitleFontId(settings.titleFontId, customFonts),
+    titleFontId: titleFontIds.zh,
+    titleFontIdZh: titleFontIds.zh,
+    titleFontIdEn: titleFontIds.en,
+    titleFontIdJa: titleFontIds.ja,
     titleFontSize: clampTitleFontSize(settings.titleFontSize),
     locale: normalizeLocaleSetting(settings.locale),
     launchPlaybackMode: normalizeLaunchPlaybackMode(settings.launchPlaybackMode),
@@ -242,7 +250,7 @@ function validateFloatSize(size) {
         : DEFAULT_FLOAT_SIZE.width,
     expandedHeight:
       Number.isFinite(expandedHeight) &&
-      expandedHeight >= 180 &&
+      expandedHeight >= 148 &&
       expandedHeight <= 640
         ? Math.round(expandedHeight)
         : DEFAULT_FLOAT_SIZE.expandedHeight

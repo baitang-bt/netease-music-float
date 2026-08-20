@@ -150,6 +150,13 @@ const DEFAULT_TITLE_FONT_ID = "system";
 const DEFAULT_TITLE_FONT_SIZE = 13;
 const MIN_TITLE_FONT_SIZE = 10;
 const MAX_TITLE_FONT_SIZE = 28;
+/** Locale keys used for per-script title font settings. */
+const TITLE_FONT_LOCALES = ["zh", "en", "ja"];
+const DEFAULT_TITLE_FONT_IDS = Object.freeze({
+  zh: DEFAULT_TITLE_FONT_ID,
+  en: DEFAULT_TITLE_FONT_ID,
+  ja: DEFAULT_TITLE_FONT_ID
+});
 
 /**
  * Returns true when the value looks like a safe imported-font id.
@@ -205,6 +212,72 @@ function resolveTitleFontStack(fontId, customFonts = []) {
   }
   const preset = TITLE_FONT_PRESETS[fontId] || TITLE_FONT_PRESETS[DEFAULT_TITLE_FONT_ID];
   return preset.stack;
+}
+
+/**
+ * Returns the primary family name for previewing a preset or imported font.
+ * @param {string} fontId
+ * @param {{ id: string, family: string }[]} [customFonts]
+ */
+function resolveTitleFontPreviewFamily(fontId, customFonts = []) {
+  const stack = resolveTitleFontStack(fontId, customFonts);
+  const quoted = stack.match(/^"([^"]+)"/);
+  if (quoted) {
+    return `"${quoted[1]}"`;
+  }
+  return stack.split(",")[0]?.trim() || "sans-serif";
+}
+
+/**
+ * Returns the human label for a preset or imported font id.
+ * @param {string} fontId
+ * @param {{ id: string, family: string }[]} [customFonts]
+ */
+function resolveTitleFontLabel(fontId, customFonts = []) {
+  const custom = normalizeCustomFonts(customFonts).find((font) => font.id === fontId);
+  if (custom) {
+    return custom.label;
+  }
+  const preset = TITLE_FONT_PRESETS[fontId] || TITLE_FONT_PRESETS[DEFAULT_TITLE_FONT_ID];
+  return preset.label;
+}
+
+/**
+ * Normalizes persisted per-locale title font ids, migrating legacy titleFontId.
+ * @param {{
+ *   titleFontId?: string,
+ *   titleFontIdZh?: string,
+ *   titleFontIdEn?: string,
+ *   titleFontIdJa?: string
+ * }} settings
+ * @param {{ id: string }[]} [customFonts]
+ */
+function normalizeTitleFontIds(settings = {}, customFonts = []) {
+  const legacy = normalizeTitleFontId(settings.titleFontId, customFonts);
+  return {
+    zh: normalizeTitleFontId(settings.titleFontIdZh ?? legacy, customFonts),
+    en: normalizeTitleFontId(settings.titleFontIdEn ?? legacy, customFonts),
+    ja: normalizeTitleFontId(settings.titleFontIdJa ?? legacy, customFonts)
+  };
+}
+
+/**
+ * Resolves CSS font-family stacks for zh / en / ja title slots.
+ * @param {{
+ *   titleFontId?: string,
+ *   titleFontIdZh?: string,
+ *   titleFontIdEn?: string,
+ *   titleFontIdJa?: string
+ * }} settings
+ * @param {{ id: string, family: string }[]} [customFonts]
+ */
+function resolveTitleFontStacks(settings = {}, customFonts = []) {
+  const ids = normalizeTitleFontIds(settings, customFonts);
+  return {
+    zh: resolveTitleFontStack(ids.zh, customFonts),
+    en: resolveTitleFontStack(ids.en, customFonts),
+    ja: resolveTitleFontStack(ids.ja, customFonts)
+  };
 }
 
 /**
@@ -278,7 +351,13 @@ if (typeof window !== "undefined") {
   window.DEFAULT_TITLE_FONT_SIZE = DEFAULT_TITLE_FONT_SIZE;
   window.MIN_TITLE_FONT_SIZE = MIN_TITLE_FONT_SIZE;
   window.MAX_TITLE_FONT_SIZE = MAX_TITLE_FONT_SIZE;
+  window.TITLE_FONT_LOCALES = TITLE_FONT_LOCALES;
+  window.DEFAULT_TITLE_FONT_IDS = DEFAULT_TITLE_FONT_IDS;
   window.resolveTitleFontStack = resolveTitleFontStack;
+  window.resolveTitleFontPreviewFamily = resolveTitleFontPreviewFamily;
+  window.resolveTitleFontLabel = resolveTitleFontLabel;
+  window.normalizeTitleFontIds = normalizeTitleFontIds;
+  window.resolveTitleFontStacks = resolveTitleFontStacks;
   window.clampTitleFontSize = clampTitleFontSize;
   window.normalizeTitleFontId = normalizeTitleFontId;
   window.normalizeCustomFonts = normalizeCustomFonts;
@@ -293,10 +372,16 @@ if (typeof module !== "undefined" && module.exports) {
     DEFAULT_TITLE_FONT_SIZE,
     MIN_TITLE_FONT_SIZE,
     MAX_TITLE_FONT_SIZE,
+    TITLE_FONT_LOCALES,
+    DEFAULT_TITLE_FONT_IDS,
     SYSTEM_FALLBACK_STACK,
     isCustomFontId,
     normalizeCustomFonts,
     resolveTitleFontStack,
+    resolveTitleFontPreviewFamily,
+    resolveTitleFontLabel,
+    normalizeTitleFontIds,
+    resolveTitleFontStacks,
     clampTitleFontSize,
     normalizeTitleFontId,
     buildCustomFontFaceCss,
