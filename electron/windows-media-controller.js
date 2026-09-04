@@ -4,6 +4,10 @@ const {
   isPlayerNowPlaying,
   normalizeTargetPlayerId
 } = require("./music-players");
+const {
+  buildTrackFingerprint,
+  isElapsedRegression
+} = require("./track-fingerprint");
 
 /**
  * Creates a Windows GSMTC controller backed by the optional
@@ -21,6 +25,7 @@ function createWindowsMediaController(options) {
   let unsubscribe = null;
   let lastTrack = null;
   let lastFingerprint = "";
+  let lastEmittedTrack = null;
 
   /** Loads the Windows-only package after platform selection. */
   function loadSessionsApi() {
@@ -128,17 +133,11 @@ function createWindowsMediaController(options) {
   function publishSessions(sessions) {
     const track = normalizeSessions(Array.isArray(sessions) ? sessions : []);
     lastTrack = track;
-    const fingerprint = [
-      track.status,
-      track.playing,
-      track.title,
-      track.artist,
-      track.album,
-      track.targetPlayerId,
-      track.artworkDataUrl ? track.artworkDataUrl.length : 0
-    ].join("|");
-    if (fingerprint !== lastFingerprint) {
+    const fingerprint = buildTrackFingerprint(track);
+    const regression = isElapsedRegression(lastEmittedTrack, track);
+    if (fingerprint !== lastFingerprint || regression) {
       lastFingerprint = fingerprint;
+      lastEmittedTrack = track;
       options.onUpdate(track);
     } else if (typeof options.onTick === "function") {
       options.onTick(track);

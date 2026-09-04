@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' nf-font:"
+    />
+    <title>网易云浮窗歌词</title>
+    <link rel="stylesheet" href="./float-lyrics.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="lyric-block" class="lyric-block">
+        <div id="lyric-original" class="lyric-line is-original" hidden></div>
+        <div id="lyric-translation" class="lyric-line is-translation" hidden></div>
+      </div>
+      <div id="ghost-block" class="ghost-block"></div>
+    </div>
+    <script src="./theme-colors.js"></script>
+    <script src="./title-fonts.js"></script>
+    <script src="./title-font-apply.js"></script>
+    <script src="./i18n.js"></script>
+    <script src="./apply-float-theme.js"></script>
+    <script src="./float-lyrics.js"></script>
+  </body>
+</html>

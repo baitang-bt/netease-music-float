@@ -325,6 +325,7 @@ function showTitleText(text) {
  * @param {object} track
  */
 function renderTrack(track) {
+  const previous = lastTrack;
   lastTrack = track || null;
   const controlsEnabled = track?.isTarget === true;
   els.controls.forEach((button) => {
@@ -377,6 +378,15 @@ function renderTrack(track) {
   }
 
   trackTitleText = track.title || window.t("float.unknownTrack");
+  if (
+    previous &&
+    track?.isTarget &&
+    (previous.title !== track.title ||
+      previous.artist !== track.artist ||
+      previous.album !== track.album)
+  ) {
+    showingLyric = false;
+  }
   if (!showingLyric) {
     showTitleText(trackTitleText);
   }

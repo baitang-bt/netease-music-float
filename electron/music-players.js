@@ -15,7 +15,8 @@ const MUSIC_PLAYERS = [
     id: "netease",
     label: "网易云音乐",
     bundleIds: ["com.netease.163music", "com.netease.CloudMusic"],
-    namePattern: /网易云|NeteaseMusic|NetEase\s*Cloud\s*Music|CloudMusic(\.exe)?/i,
+    namePattern:
+      /网易云|NeteaseMusic|NetEase\s*Music|NetEase\s*Cloud\s*Music|CloudMusic(\.exe)?/i,
     appNames: ["NeteaseMusic", "NetEaseMusic", "网易云音乐"],
     appFileNames: ["NeteaseMusic.app", "NetEaseMusic.app", "网易云音乐.app"],
     windowsUri: "orpheus://",
@@ -211,6 +212,14 @@ function isPlayerNowPlaying(info, playerId) {
   const bundleId =
     typeof info.bundleIdentifier === "string" ? info.bundleIdentifier : "";
   if (bundleId && player.bundleIds.includes(bundleId)) {
+    return true;
+  }
+
+  const parentBundleId =
+    typeof info.parentApplicationBundleIdentifier === "string"
+      ? info.parentApplicationBundleIdentifier
+      : "";
+  if (parentBundleId && player.bundleIds.includes(parentBundleId)) {
     return true;
   }
 

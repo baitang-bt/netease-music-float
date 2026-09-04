@@ -16,7 +16,29 @@ const { COMMANDS } = require("../electron/media-remote");
 const {
   createWindowsMediaController
 } = require("../electron/windows-media-controller");
-const { validateFloatSize } = require("../electron/state-store");
+const {
+  buildTrackFingerprint,
+  isElapsedRegression
+} = require("../electron/track-fingerprint");
+const {
+  validateFloatSize,
+  validateSettings,
+  normalizeFloatLyricsMode,
+  clampTremorAmplitude,
+  clampTremorFrequency,
+  clampFloatLyricsFontSize,
+  clampFloatLyricsFadeMs,
+  clampFloatLyricsCharInterval,
+  clampFloatLyricsMinShowMs,
+  clampFloatLyricsMaxShowMs,
+  MAX_TREMOR_AMPLITUDE,
+  MAX_TREMOR_FREQUENCY,
+  MAX_FLOAT_LYRICS_FONT_SIZE,
+  MAX_FLOAT_LYRICS_FADE_MS,
+  MAX_FLOAT_LYRICS_CHAR_INTERVAL,
+  MAX_FLOAT_LYRICS_MIN_SHOW_MS,
+  MAX_FLOAT_LYRICS_MAX_SHOW_MS
+} = require("../electron/state-store");
 
 describe("fft", () => {
   it("rejects non power-of-two lengths", () => {
@@ -139,6 +161,69 @@ describe("music players", () => {
     assert.equal(apple.namePattern.test("Apple Music Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"), false);
   });
 
+  it("matches parent application bundle ids for helper processes", () => {
+    assert.equal(
+      isPlayerNowPlaying(
+        {
+          bundleIdentifier: "com.example.helper",
+          parentApplicationBundleIdentifier: "com.netease.163music"
+        },
+        "netease"
+      ),
+      true
+    );
+  });
+
+  it("matches NetEase Music display name with a space", () => {
+    assert.equal(
+      isPlayerNowPlaying({ displayName: "NetEase Music" }, "netease"),
+      true
+    );
+  });
+});
+
+describe("track fingerprint", () => {
+  it("distinguishes tracks that share title and artist", () => {
+    const base = {
+      status: "matched",
+      playing: true,
+      title: "Song",
+      artist: "Artist",
+      targetPlayerId: "netease",
+      repeatMode: null,
+      shuffleMode: null,
+      artworkDataUrl: null
+    };
+    const a = buildTrackFingerprint({ ...base, album: "Album A" });
+    const b = buildTrackFingerprint({ ...base, album: "Album B" });
+    assert.notEqual(a, b);
+  });
+
+  it("detects elapsed regression for same metadata", () => {
+    const identity = {
+      status: "matched",
+      title: "Song",
+      artist: "Artist",
+      album: "Album"
+    };
+    assert.equal(
+      isElapsedRegression(
+        { ...identity, elapsed: 120 },
+        { ...identity, elapsed: 0.5 }
+      ),
+      true
+    );
+    assert.equal(
+      isElapsedRegression(
+        { ...identity, elapsed: 30 },
+        { ...identity, elapsed: 28 }
+      ),
+      false
+    );
+  });
+});
+
+describe("music player process matching", () => {
   it("matches only the player's main MacOS executable for AudioTee taps", () => {
     const {
       commandMatchesPlayer,
@@ -288,5 +373,67 @@ describe("float size", () => {
       validateFloatSize({ width: 900, expandedHeight: 50 }),
       { width: 320, expandedHeight: 172 }
     );
+  });
+});
+
+describe("float lyrics settings", () => {
+  it("defaults to disabled with translation+original both shown", () => {
+    const settings = validateSettings({});
+    assert.equal(settings.floatLyricsEnabled, false);
+    assert.equal(settings.floatLyricsMode, "both");
+    assert.equal(settings.floatLyricsTremorAmplitude, 0);
+    assert.equal(settings.floatLyricsTremorFrequency, 8);
+    assert.equal(settings.floatLyricsColor, "#ffffff");
+    assert.equal(settings.floatLyricsFontSize, 26);
+    assert.equal(settings.floatLyricsFadeMs, 500);
+    assert.equal(settings.floatLyricsCharInterval, 0.1);
+    assert.equal(settings.floatLyricsMinShowMs, 1200);
+    assert.equal(settings.floatLyricsMaxShowMs, 0);
+    assert.equal(settings.floatLyricsAdaptiveSpeed, true);
+  });
+
+  it("clamps tremor amplitude and frequency into supported ranges", () => {
+    assert.equal(clampTremorAmplitude(99), MAX_TREMOR_AMPLITUDE);
+    assert.equal(clampTremorAmplitude(2.6), 2.6);
+    assert.equal(clampTremorAmplitude(7.25), 7.3);
+    assert.equal(clampTremorAmplitude(-5), 0);
+    assert.equal(clampTremorFrequency(999), MAX_TREMOR_FREQUENCY);
+    assert.equal(clampTremorFrequency(0), 1);
+    assert.equal(clampTremorFrequency(12.5), 12.5);
+  });
+
+  it("clamps float lyric font size and fade duration", () => {
+    assert.equal(clampFloatLyricsFontSize(999), MAX_FLOAT_LYRICS_FONT_SIZE);
+    assert.equal(clampFloatLyricsFontSize(8), 14);
+    assert.equal(clampFloatLyricsFontSize(30), 30);
+    assert.equal(clampFloatLyricsFadeMs(9999), MAX_FLOAT_LYRICS_FADE_MS);
+    assert.equal(clampFloatLyricsFadeMs(-10), 0);
+    assert.equal(clampFloatLyricsFadeMs(700), 700);
+  });
+
+  it("clamps per-character output interval between 0.01s and 1s", () => {
+    assert.equal(clampFloatLyricsCharInterval(9), MAX_FLOAT_LYRICS_CHAR_INTERVAL);
+    assert.equal(clampFloatLyricsCharInterval(0.001), 0.01);
+    assert.equal(clampFloatLyricsCharInterval(0.25), 0.25);
+    assert.equal(clampFloatLyricsCharInterval(0.5), 0.5);
+  });
+
+  it("clamps min/max lyric display times", () => {
+    assert.equal(clampFloatLyricsMinShowMs(999999), MAX_FLOAT_LYRICS_MIN_SHOW_MS);
+    assert.equal(clampFloatLyricsMinShowMs(-5), 0);
+    assert.equal(clampFloatLyricsMinShowMs(1500), 1500);
+    assert.equal(clampFloatLyricsMaxShowMs(999999), MAX_FLOAT_LYRICS_MAX_SHOW_MS);
+    assert.equal(clampFloatLyricsMaxShowMs(-5), 0);
+    assert.equal(clampFloatLyricsMaxShowMs(8000), 8000);
+  });
+
+  it("falls back from invalid mode and color", () => {
+    assert.equal(normalizeFloatLyricsMode("weird"), "both");
+    const settings = validateSettings({
+      floatLyricsMode: "original",
+      floatLyricsColor: "not-a-color"
+    });
+    assert.equal(settings.floatLyricsMode, "original");
+    assert.equal(settings.floatLyricsColor, "#ffffff");
   });
 });

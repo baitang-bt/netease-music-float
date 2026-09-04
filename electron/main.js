@@ -36,6 +36,7 @@ const {
   applyWindowStackLevel,
   FLOAT_ALWAYS_ON_TOP_LEVEL
 } = require("./lyric-overlay");
+const { createFloatLyricsController } = require("./float-lyrics");
 const { createAutoUpdater } = require("./auto-update");
 const {
   importCustomFont,
@@ -111,6 +112,7 @@ let knownPlaybackMode = null;
 let launchPlaybackModeSynced = false;
 let lyricsController = null;
 let lyricOverlay = null;
+let floatLyrics = null;
 let autoUpdaterController = null;
 /** Last auto-update status payload for Settings / float hints. */
 let latestUpdateStatus = {
@@ -639,6 +641,7 @@ function broadcastSettings(settings) {
     floatWindow.webContents.send("settings:changed", settings);
   }
   lyricOverlay?.send("settings:changed", settings);
+  floatLyrics?.send("settings:changed", settings);
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.webContents.send("settings:changed", settings);
   }
@@ -716,6 +719,7 @@ function broadcastLyric(payload) {
     floatWindow.webContents.send("media:lyric", payload);
   }
   lyricOverlay?.send("media:lyric", payload);
+  floatLyrics?.send("media:lyric", payload);
 }
 
 /**
@@ -861,6 +865,9 @@ function registerIpc() {
     applyAlwaysOnTop(settings.alwaysOnTop);
     if (settings.locale !== previous.locale) {
       syncAppLocale();
+    }
+    if (settings.floatLyricsEnabled !== previous.floatLyricsEnabled) {
+      floatLyrics?.ensure();
     }
     broadcastSettings(settings);
     if (settings.targetPlayerId !== previous.targetPlayerId) {
@@ -1268,12 +1275,16 @@ app.whenReady().then(async () => {
       }
     },
     onTick: (track) => {
+      const playingChanged = latestTrack.playing !== track.playing;
       latestTrack = {
         ...latestTrack,
         elapsed: track.elapsed,
         elapsedSampledAt: track.elapsedSampledAt,
         playing: track.playing
       };
+      if (playingChanged) {
+        broadcastTrack(latestTrack);
+      }
     }
   });
 
@@ -1303,6 +1314,14 @@ app.whenReady().then(async () => {
       lyricsController?.resync(latestTrack);
     }
   });
+  floatLyrics = createFloatLyricsController({
+    getSettings: () => stateStore.getSettings(),
+    onLyricsReady: () => {
+      floatLyrics.send("settings:changed", stateStore.getSettings());
+      floatLyrics.send("media:lyric", lyricsController?.getLastPayload() || null);
+    }
+  });
+  floatLyrics.ensure();
   createTray();
   createFloatWindow();
   mediaController.start();
@@ -1361,6 +1380,7 @@ app.on("before-quit", (event) => {
       await mediaController?.stop();
       lyricsController?.stop();
       lyricOverlay?.destroy();
+      floatLyrics?.destroy();
       if (silenceTimer) {
         clearInterval(silenceTimer);
         silenceTimer = null;

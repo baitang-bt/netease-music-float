@@ -1,5 +1,6 @@
 const https = require("node:https");
 const { resolveSongId } = require("./netease-song-id");
+const { buildTrackIdentity } = require("./track-fingerprint");
 
 const SEARCH_HOST = "music.163.com";
 const USER_AGENT =
@@ -321,7 +322,7 @@ function createLyricsController(options) {
       return;
     }
 
-    const key = `${track.title}|${track.artist || ""}|${track.album || ""}`;
+    const key = buildTrackIdentity(track);
     // Same identity: reuse cache, or keep the in-flight fetch (do not bump
     // loadToken — artwork/play-state rebinds would otherwise drop the response).
     if (key === cacheKey) {

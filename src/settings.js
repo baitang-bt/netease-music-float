@@ -36,11 +36,40 @@ const floatHeightInput = document.querySelector("#float-height");
 const floatWidthLabel = document.querySelector("#float-width-label");
 const floatHeightLabel = document.querySelector("#float-height-label");
 const resetFloatSizeBtn = document.querySelector("#btn-reset-float-size");
+const floatLyricsEnabledInput = document.querySelector("#float-lyrics-enabled");
+const floatLyricsOptions = document.querySelector("#float-lyrics-options");
+const floatLyricsModeSelect = document.querySelector("#float-lyrics-mode");
+const floatLyricsAmplitudeInput = document.querySelector("#float-lyrics-amplitude");
+const floatLyricsAmplitudeLabel = document.querySelector("#float-lyrics-amplitude-label");
+const floatLyricsFrequencyInput = document.querySelector("#float-lyrics-frequency");
+const floatLyricsFrequencyLabel = document.querySelector("#float-lyrics-frequency-label");
+const floatLyricsColorInput = document.querySelector("#float-lyrics-color");
+const floatLyricsFontSizeInput = document.querySelector("#float-lyrics-font-size");
+const floatLyricsFontSizeLabel = document.querySelector("#float-lyrics-font-size-label");
+const floatLyricsFadeInput = document.querySelector("#float-lyrics-fade");
+const floatLyricsFadeLabel = document.querySelector("#float-lyrics-fade-label");
+const floatLyricsCharIntervalInput = document.querySelector("#float-lyrics-char-interval");
+const floatLyricsCharIntervalLabel = document.querySelector("#float-lyrics-char-interval-label");
+const floatLyricsMinShowInput = document.querySelector("#float-lyrics-min-show");
+const floatLyricsMinShowLabel = document.querySelector("#float-lyrics-min-show-label");
+const floatLyricsMaxShowInput = document.querySelector("#float-lyrics-max-show");
+const floatLyricsMaxShowLabel = document.querySelector("#float-lyrics-max-show-label");
+const floatLyricsAdaptiveInput = document.querySelector("#float-lyrics-adaptive");
 
 const DEFAULT_WINDOW_COLOR = "#24242a";
 const DEFAULT_SPECTRUM_COLOR = "#e60026";
+const DEFAULT_FLOAT_LYRICS_COLOR = "#ffffff";
 const DEFAULT_FLOAT_WIDTH = 320;
 const DEFAULT_FLOAT_HEIGHT = 172;
+
+/** Display helper: strips float noise to at most one decimal place. */
+function fmt1(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
+  return String(Math.round(number * 10) / 10);
+}
 
 /** Cache of installed players from the main process. */
 let installedPlayers = [];
@@ -410,6 +439,35 @@ function renderSettings(settings) {
   }
   updatePlayerDependentUi(targetPlayerSelect.value || selectedId);
 
+  floatLyricsEnabledInput.checked = Boolean(settings.floatLyricsEnabled);
+  floatLyricsOptions.hidden = !settings.floatLyricsEnabled;
+  floatLyricsModeSelect.value = settings.floatLyricsMode || "both";
+  const amplitudeSetting = Number(settings.floatLyricsTremorAmplitude);
+  const amplitude = Number.isFinite(amplitudeSetting) ? amplitudeSetting : 0;
+  const frequency = Number(settings.floatLyricsTremorFrequency) || 8;
+  floatLyricsAmplitudeInput.value = String(amplitude);
+  floatLyricsAmplitudeLabel.textContent = `${fmt1(amplitude)}px`;
+  floatLyricsFrequencyInput.value = String(frequency);
+  floatLyricsFrequencyLabel.textContent = `${fmt1(frequency)}Hz`;
+  floatLyricsColorInput.value = settings.floatLyricsColor || "#ffffff";
+  const floatLyricsSize = Number(settings.floatLyricsFontSize) || 26;
+  const fadeMs = Number(settings.floatLyricsFadeMs) || 0;
+  floatLyricsFontSizeInput.value = String(floatLyricsSize);
+  floatLyricsFontSizeLabel.textContent = `${floatLyricsSize}px`;
+  floatLyricsFadeInput.value = String(fadeMs);
+  floatLyricsFadeLabel.textContent = `${fadeMs}ms`;
+  const charInterval = Number(settings.floatLyricsCharInterval) || 0.1;
+  floatLyricsCharIntervalInput.value = String(charInterval);
+  floatLyricsCharIntervalLabel.textContent = `${charInterval}s/字`;
+  const minShowSec = (Number(settings.floatLyricsMinShowMs) || 0) / 1000;
+  const maxShowSec = (Number(settings.floatLyricsMaxShowMs) || 0) / 1000;
+  floatLyricsMinShowInput.value = String(minShowSec);
+  floatLyricsMinShowLabel.textContent = `${fmt1(minShowSec)}s`;
+  floatLyricsMaxShowInput.value = String(maxShowSec);
+  floatLyricsMaxShowLabel.textContent =
+    maxShowSec > 0 ? `${fmt1(maxShowSec)}s` : window.t("settings.floatLyrics.unlimited");
+  floatLyricsAdaptiveInput.checked = settings.floatLyricsAdaptiveSpeed !== false;
+
   if (lastUpdateStatus) {
     renderUpdateStatus(lastUpdateStatus);
   }
@@ -528,6 +586,66 @@ transparentFloatInput.addEventListener("change", (event) => {
   api.updateSettings({ transparentFloat: event.target.checked });
 });
 
+floatLyricsEnabledInput.addEventListener("change", (event) => {
+  floatLyricsOptions.hidden = !event.target.checked;
+  api.updateSettings({ floatLyricsEnabled: event.target.checked });
+});
+
+floatLyricsModeSelect.addEventListener("change", (event) => {
+  api.updateSettings({ floatLyricsMode: event.target.value });
+});
+
+floatLyricsAmplitudeInput.addEventListener("input", (event) => {
+  const value = Number(event.target.value) || 0;
+  floatLyricsAmplitudeLabel.textContent = `${fmt1(value)}px`;
+  api.updateSettings({ floatLyricsTremorAmplitude: value });
+});
+
+floatLyricsFrequencyInput.addEventListener("input", (event) => {
+  const value = Number(event.target.value) || 1;
+  floatLyricsFrequencyLabel.textContent = `${fmt1(value)}Hz`;
+  api.updateSettings({ floatLyricsTremorFrequency: value });
+});
+
+floatLyricsColorInput.addEventListener("input", (event) => {
+  api.updateSettings({ floatLyricsColor: event.target.value });
+});
+
+floatLyricsFontSizeInput.addEventListener("input", (event) => {
+  const value = Number(event.target.value) || 14;
+  floatLyricsFontSizeLabel.textContent = `${value}px`;
+  api.updateSettings({ floatLyricsFontSize: value });
+});
+
+floatLyricsFadeInput.addEventListener("input", (event) => {
+  const value = Number(event.target.value) || 0;
+  floatLyricsFadeLabel.textContent = `${value}ms`;
+  api.updateSettings({ floatLyricsFadeMs: value });
+});
+
+floatLyricsCharIntervalInput.addEventListener("input", (event) => {
+  const value = Number(event.target.value) || 0.1;
+  floatLyricsCharIntervalLabel.textContent = `${value}s/字`;
+  api.updateSettings({ floatLyricsCharInterval: value });
+});
+
+floatLyricsMinShowInput.addEventListener("input", (event) => {
+  const value = Number(event.target.value) || 0;
+  floatLyricsMinShowLabel.textContent = `${fmt1(value)}s`;
+  api.updateSettings({ floatLyricsMinShowMs: Math.round(value * 1000) });
+});
+
+floatLyricsMaxShowInput.addEventListener("input", (event) => {
+  const value = Number(event.target.value) || 0;
+  floatLyricsMaxShowLabel.textContent =
+    value > 0 ? `${fmt1(value)}s` : window.t("settings.floatLyrics.unlimited");
+  api.updateSettings({ floatLyricsMaxShowMs: Math.round(value * 1000) });
+});
+
+floatLyricsAdaptiveInput.addEventListener("change", (event) => {
+  api.updateSettings({ floatLyricsAdaptiveSpeed: event.target.checked });
+});
+
 windowColorInput.addEventListener("input", (event) => {
   api.updateSettings({ windowColor: event.target.value });
 });
@@ -608,7 +726,8 @@ document.querySelector("#btn-reset-colors").addEventListener("click", () => {
     titleFontIdZh: window.DEFAULT_TITLE_FONT_ID,
     titleFontIdEn: window.DEFAULT_TITLE_FONT_ID,
     titleFontIdJa: window.DEFAULT_TITLE_FONT_ID,
-    titleFontSize: window.DEFAULT_TITLE_FONT_SIZE
+    titleFontSize: window.DEFAULT_TITLE_FONT_SIZE,
+    floatLyricsColor: DEFAULT_FLOAT_LYRICS_COLOR
   });
 });
 

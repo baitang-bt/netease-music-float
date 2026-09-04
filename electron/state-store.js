@@ -14,6 +14,21 @@ const {
 const { normalizeLaunchPlaybackMode } = require("./netease-playback-mode");
 const { normalizeTargetPlayerId } = require("./music-players");
 
+/** Max px offset for the floating lyric tremor animation. */
+const MAX_TREMOR_AMPLITUDE = 12;
+/** Max tremor cycles per second for the floating lyric animation. */
+const MAX_TREMOR_FREQUENCY = 30;
+/** Max floating lyric text size in px. */
+const MAX_FLOAT_LYRICS_FONT_SIZE = 56;
+/** Max lyric cross-fade duration in ms. */
+const MAX_FLOAT_LYRICS_FADE_MS = 3000;
+/** Max per-character output interval in seconds. */
+const MAX_FLOAT_LYRICS_CHAR_INTERVAL = 1;
+/** Max minimum-display time for a lyric line (ms). */
+const MAX_FLOAT_LYRICS_MIN_SHOW_MS = 30000;
+/** Max maximum-display time for a lyric line (ms). */
+const MAX_FLOAT_LYRICS_MAX_SHOW_MS = 60000;
+
 const STATE_VERSION = 2;
 
 const DEFAULT_SETTINGS = {
@@ -46,7 +61,29 @@ const DEFAULT_SETTINGS = {
   /** Catalog player id whose Now Playing the float follows. */
   targetPlayerId: "netease",
   /** Check GitHub Releases for updates shortly after launch. */
-  autoCheckUpdates: true
+  autoCheckUpdates: true,
+  /** Fullscreen floating lyric overlay enabled. */
+  floatLyricsEnabled: false,
+  /** Which lyric content is shown in the floating overlay when translated. */
+  floatLyricsMode: "both",
+  /** Floating lyric tremor max offset in px. */
+  floatLyricsTremorAmplitude: 0,
+  /** Floating lyric tremor cycles per second. */
+  floatLyricsTremorFrequency: 8,
+  /** Floating lyric text color (#rrggbb). */
+  floatLyricsColor: "#ffffff",
+  /** Floating lyric base text size in px (translation scales with it). */
+  floatLyricsFontSize: 26,
+  /** Lyric line cross-fade duration in ms when a new line replaces the old. */
+  floatLyricsFadeMs: 500,
+  /** Per-character typewriter output interval in seconds. */
+  floatLyricsCharInterval: 0.1,
+  /** Minimum ms a lyric line stays visible before it can be replaced. */
+  floatLyricsMinShowMs: 1200,
+  /** Maximum ms a lyric line can stay visible before it fades out (0 = no cap). */
+  floatLyricsMaxShowMs: 0,
+  /** Auto-adjust typewriter speed by line length (long lines reveal faster). */
+  floatLyricsAdaptiveSpeed: true
 };
 
 const DEFAULT_FLOAT_SIZE = {
@@ -213,8 +250,147 @@ function validateSettings(settings) {
     autoCheckUpdates:
       typeof settings.autoCheckUpdates === "boolean"
         ? settings.autoCheckUpdates
-        : DEFAULT_SETTINGS.autoCheckUpdates
+        : DEFAULT_SETTINGS.autoCheckUpdates,
+    floatLyricsEnabled:
+      typeof settings.floatLyricsEnabled === "boolean"
+        ? settings.floatLyricsEnabled
+        : DEFAULT_SETTINGS.floatLyricsEnabled,
+    floatLyricsMode: normalizeFloatLyricsMode(settings.floatLyricsMode),
+    floatLyricsTremorAmplitude: clampTremorAmplitude(
+      settings.floatLyricsTremorAmplitude
+    ),
+    floatLyricsTremorFrequency: clampTremorFrequency(
+      settings.floatLyricsTremorFrequency
+    ),
+    floatLyricsColor: normalizeHex(
+      settings.floatLyricsColor,
+      DEFAULT_SETTINGS.floatLyricsColor
+    ),
+    floatLyricsFontSize: clampFloatLyricsFontSize(settings.floatLyricsFontSize),
+    floatLyricsFadeMs: clampFloatLyricsFadeMs(settings.floatLyricsFadeMs),
+    floatLyricsCharInterval: clampFloatLyricsCharInterval(
+      settings.floatLyricsCharInterval
+    ),
+    floatLyricsMinShowMs: clampFloatLyricsMinShowMs(
+      settings.floatLyricsMinShowMs
+    ),
+    floatLyricsMaxShowMs: clampFloatLyricsMaxShowMs(
+      settings.floatLyricsMaxShowMs
+    ),
+    floatLyricsAdaptiveSpeed:
+      typeof settings.floatLyricsAdaptiveSpeed === "boolean"
+        ? settings.floatLyricsAdaptiveSpeed
+        : DEFAULT_SETTINGS.floatLyricsAdaptiveSpeed
   };
+}
+
+/**
+ * Coerces the floating lyric content mode to a known value.
+ * @param {unknown} value
+ */
+function normalizeFloatLyricsMode(value) {
+  if (value === "both" || value === "original" || value === "translation") {
+    return value;
+  }
+  return DEFAULT_SETTINGS.floatLyricsMode;
+}
+
+/**
+ * Clamps the floating lyric tremor amplitude into a usable range, allowing
+ * fractional px steps (e.g. 0.0–12.0).
+ * @param {unknown} value
+ */
+function clampTremorAmplitude(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return DEFAULT_SETTINGS.floatLyricsTremorAmplitude;
+  }
+  return Math.min(MAX_TREMOR_AMPLITUDE, Math.max(0, round1(number)));
+}
+
+/**
+ * Clamps the floating lyric tremor frequency into a usable range, allowing
+ * fractional Hz steps (e.g. 1.0–30.0).
+ * @param {unknown} value
+ */
+function clampTremorFrequency(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return DEFAULT_SETTINGS.floatLyricsTremorFrequency;
+  }
+  return Math.min(MAX_TREMOR_FREQUENCY, Math.max(1, round1(number)));
+}
+
+/**
+ * Rounds a number to one decimal place (e.g. 2.34 → 2.3, 1.25 → 1.3).
+ * @param {number} value
+ */
+function round1(value) {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * Clamps the floating lyric base font size into a readable range.
+ * @param {unknown} value
+ */
+function clampFloatLyricsFontSize(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return DEFAULT_SETTINGS.floatLyricsFontSize;
+  }
+  return Math.min(MAX_FLOAT_LYRICS_FONT_SIZE, Math.max(14, Math.round(number)));
+}
+
+/**
+ * Clamps the floating lyric cross-fade duration into a usable range.
+ * @param {unknown} value
+ */
+function clampFloatLyricsFadeMs(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return DEFAULT_SETTINGS.floatLyricsFadeMs;
+  }
+  return Math.min(MAX_FLOAT_LYRICS_FADE_MS, Math.max(0, Math.round(number)));
+}
+
+/**
+ * Clamps the floating lyric per-character output interval into seconds.
+ * Minimum 0.01s (fast), default 0.1s, maximum 1s (slow).
+ * @param {unknown} value
+ */
+function clampFloatLyricsCharInterval(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return DEFAULT_SETTINGS.floatLyricsCharInterval;
+  }
+  return Math.min(
+    MAX_FLOAT_LYRICS_CHAR_INTERVAL,
+    Math.max(0.01, Math.round(number * 100) / 100)
+  );
+}
+
+/**
+ * Clamps the minimum lyric display time (ms) into a usable range.
+ * @param {unknown} value
+ */
+function clampFloatLyricsMinShowMs(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return DEFAULT_SETTINGS.floatLyricsMinShowMs;
+  }
+  return Math.min(MAX_FLOAT_LYRICS_MIN_SHOW_MS, Math.max(0, Math.round(number)));
+}
+
+/**
+ * Clamps the maximum lyric display time (ms) into a usable range (0 = no cap).
+ * @param {unknown} value
+ */
+function clampFloatLyricsMaxShowMs(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return DEFAULT_SETTINGS.floatLyricsMaxShowMs;
+  }
+  return Math.min(MAX_FLOAT_LYRICS_MAX_SHOW_MS, Math.max(0, Math.round(number)));
 }
 
 /**
@@ -260,7 +436,22 @@ function validateFloatSize(size) {
 module.exports = {
   DEFAULT_SETTINGS,
   DEFAULT_FLOAT_SIZE,
+  MAX_TREMOR_AMPLITUDE,
+  MAX_TREMOR_FREQUENCY,
+  MAX_FLOAT_LYRICS_FONT_SIZE,
+  MAX_FLOAT_LYRICS_FADE_MS,
+  MAX_FLOAT_LYRICS_CHAR_INTERVAL,
+  MAX_FLOAT_LYRICS_MIN_SHOW_MS,
+  MAX_FLOAT_LYRICS_MAX_SHOW_MS,
   createStateStore,
   validateSettings,
-  validateFloatSize
+  validateFloatSize,
+  normalizeFloatLyricsMode,
+  clampTremorAmplitude,
+  clampTremorFrequency,
+  clampFloatLyricsFontSize,
+  clampFloatLyricsFadeMs,
+  clampFloatLyricsCharInterval,
+  clampFloatLyricsMinShowMs,
+  clampFloatLyricsMaxShowMs
 };

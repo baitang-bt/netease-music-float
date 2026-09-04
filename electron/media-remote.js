@@ -6,6 +6,10 @@ const {
   normalizeTargetPlayerId
 } = require("./music-players");
 const { resolveAdapterPaths } = require("./paths");
+const {
+  buildTrackFingerprint,
+  isElapsedRegression
+} = require("./track-fingerprint");
 
 /** MediaRemote command IDs used by mediaremote-adapter `send`. */
 const COMMANDS = {
@@ -42,6 +46,7 @@ function createMediaRemoteController(options) {
   let lastFingerprint = "";
   let lastArtKey = "";
   let lastTrack = null;
+  let lastEmittedTrack = null;
   let lightRefreshTimer = null;
   let artFetchToken = 0;
 
@@ -109,16 +114,26 @@ function createMediaRemoteController(options) {
         elapsed: null,
         repeatMode: null,
         shuffleMode: null,
-        processIdentifier: null,
-        bundleIdentifier: null
-      };
+      processIdentifier: null,
+      bundleIdentifier: null,
+      contentItemIdentifier: null,
+      uniqueIdentifier: null
+    };
       return lastTrack;
     }
 
     const payload = JSON.parse(trimmed);
     const targetPlayerId = resolveTargetPlayerId();
     const targetPlayer = getPlayerById(targetPlayerId);
-    const isTarget = isPlayerNowPlaying(payload, targetPlayerId);
+    const isTarget = isPlayerNowPlaying(
+      {
+        bundleIdentifier: payload.bundleIdentifier,
+        parentApplicationBundleIdentifier:
+          payload.parentApplicationBundleIdentifier,
+        displayName: payload.displayName
+      },
+      targetPlayerId
+    );
     const isNetease = isTarget && targetPlayerId === "netease";
     const artworkDataUrl = noArtwork
       ? lastTrack?.artworkDataUrl ?? null
@@ -144,6 +159,10 @@ function createMediaRemoteController(options) {
       shuffleMode: numberOrNull(payload.shuffleMode),
       processIdentifier: numberOrNull(payload.processIdentifier),
       bundleIdentifier: payload.bundleIdentifier ?? null,
+      parentApplicationBundleIdentifier:
+        payload.parentApplicationBundleIdentifier ?? null,
+      contentItemIdentifier: payload.contentItemIdentifier ?? null,
+      uniqueIdentifier: payload.uniqueIdentifier ?? null,
       displayName: payload.displayName ?? null
     };
     return lastTrack;
@@ -155,18 +174,11 @@ function createMediaRemoteController(options) {
    * @param {{ fetchArtwork?: boolean }} [opts]
    */
   function emitIfChanged(track, opts = {}) {
-    const fingerprint = [
-      track.status,
-      track.playing,
-      track.title,
-      track.artist,
-      track.targetPlayerId,
-      track.repeatMode,
-      track.shuffleMode,
-      track.artworkDataUrl ? track.artworkDataUrl.length : 0
-    ].join("|");
-    if (fingerprint !== lastFingerprint) {
+    const fingerprint = buildTrackFingerprint(track);
+    const regression = isElapsedRegression(lastEmittedTrack, track);
+    if (fingerprint !== lastFingerprint || regression) {
       lastFingerprint = fingerprint;
+      lastEmittedTrack = track;
       options.onUpdate(track);
     } else if (typeof options.onTick === "function") {
       // Elapsed-only refresh for lyric sync without UI churn.

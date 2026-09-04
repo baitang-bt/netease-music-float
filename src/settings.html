@@ -224,6 +224,144 @@
             </button>
           </article>
 
+          <article class="card">
+            <h2 class="card-title" data-i18n="settings.floatLyrics">漂浮文字</h2>
+            <label class="setting-row">
+              <span class="setting-text">
+                <strong data-i18n="settings.floatLyrics.enable">漂浮歌词</strong>
+                <small data-i18n="settings.floatLyrics.help">
+                  全屏置顶的飘动歌词，点击不会聚焦。
+                </small>
+              </span>
+              <input id="float-lyrics-enabled" type="checkbox" />
+            </label>
+            <div id="float-lyrics-options" class="card-body" hidden>
+              <label class="setting-row setting-row-stack">
+                <span class="setting-text">
+                  <strong data-i18n="settings.floatLyrics.mode">歌词展示</strong>
+                </span>
+                <select id="float-lyrics-mode" class="setting-select">
+                  <option value="both" data-i18n="settings.floatLyrics.both">原文 + 译文</option>
+                  <option value="original" data-i18n="settings.floatLyrics.original">仅原文</option>
+                  <option value="translation" data-i18n="settings.floatLyrics.translation">仅译文</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.tremorAmplitude">颤抖幅度</strong>
+                  <small id="float-lyrics-amplitude-label">0px</small>
+                </span>
+                <input
+                  id="float-lyrics-amplitude"
+                  type="range"
+                  min="0"
+                  max="12"
+                  step="0.5"
+                  value="0"
+                />
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.tremorFrequency">颤抖频率</strong>
+                  <small id="float-lyrics-frequency-label">8Hz</small>
+                </span>
+                <input
+                  id="float-lyrics-frequency"
+                  type="range"
+                  min="1"
+                  max="30"
+                  step="0.5"
+                  value="8"
+                />
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.floatLyrics.color">文字颜色</strong>
+                </span>
+                <input id="float-lyrics-color" type="color" value="#ffffff" />
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.floatLyrics.fontSize">字号</strong>
+                  <small id="float-lyrics-font-size-label">26px</small>
+                </span>
+                <input
+                  id="float-lyrics-font-size"
+                  type="range"
+                  min="14"
+                  max="56"
+                  step="1"
+                  value="26"
+                />
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.floatLyrics.fade">淡出时长</strong>
+                  <small id="float-lyrics-fade-label">500ms</small>
+                </span>
+                <input
+                  id="float-lyrics-fade"
+                  type="range"
+                  min="0"
+                  max="3000"
+                  step="50"
+                  value="500"
+                />
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.floatLyrics.charInterval">输出速度</strong>
+                  <small id="float-lyrics-char-interval-label">0.1s/字</small>
+                </span>
+                <input
+                  id="float-lyrics-char-interval"
+                  type="range"
+                  min="0.01"
+                  max="1"
+                  step="0.01"
+                  value="0.1"
+                />
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.floatLyrics.adaptive">自适应速度</strong>
+                  <small data-i18n="settings.floatLyrics.adaptive.help">
+                    长句自动加快，避免显示过久。
+                  </small>
+                </span>
+                <input id="float-lyrics-adaptive" type="checkbox" checked />
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.floatLyrics.minShow">最短显示</strong>
+                  <small id="float-lyrics-min-show-label">1.2s</small>
+                </span>
+                <input
+                  id="float-lyrics-min-show"
+                  type="range"
+                  min="0"
+                  max="30"
+                  step="0.1"
+                  value="1.2"
+                />
+              </label>
+              <label class="setting-row">
+                <span class="setting-text">
+                  <strong data-i18n="settings.floatLyrics.maxShow">最长显示</strong>
+                  <small id="float-lyrics-max-show-label">不限</small>
+                </span>
+                <input
+                  id="float-lyrics-max-show"
+                  type="range"
+                  min="0"
+                  max="60"
+                  step="0.1"
+                  value="0"
+                />
+              </label>
+            </div>
+          </article>
+
           <article class="card" id="audio-capture-card">
             <h2 class="card-title" data-i18n="settings.audio">系统音频录制</h2>
             <p class="card-hint" data-i18n="settings.audio.hint">

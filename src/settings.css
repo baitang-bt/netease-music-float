@@ -178,6 +178,16 @@ button:active {
   border-top: 1px solid var(--line);
 }
 
+.card-body {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.card-body[hidden] {
+  display: none;
+}
+
 .card-title {
   margin: 0;
   font-size: 12px;
