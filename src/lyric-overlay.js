@@ -78,7 +78,7 @@ function renderTrack(track) {
  * @param {{ line?: string, translation?: string, showLyric?: boolean }} payload
  */
 function renderLyric(payload) {
-  if (payload?.showLyric && payload.line) {
+  if (payload?.line) {
     showingLyric = true;
     window.renderMultilingualText(titleText, payload.line);
     titleEl.classList.add("is-lyric");

@@ -1,40 +1,21 @@
 const api = window.neteaseFloat;
 const appRoot = document.querySelector("#app");
-const blockEl = document.querySelector("#lyric-block");
-const originalEl = document.querySelector("#lyric-original");
-const translationEl = document.querySelector("#lyric-translation");
-const ghostEl = document.querySelector("#ghost-block");
+const layerEl = document.querySelector("#lyric-layer");
 
 let lastSettings = null;
 let lastPayload = null;
-/** Current line key so a repeat lyric payload does not re-randomize placement. */
-let placedKey = "";
-/** Random placement/rotation assigned to the current line key. */
-let placedStyle = null;
-/** Key currently shown on screen (used to fade-out before swapping). */
-let renderedKey = "";
-/** Pending fade-out -> swap timer. */
-let swapTimer = null;
-/** Last used tilt, to guarantee successive lines use noticeably different angles. */
-let lastTilt = null;
-/** Timestamp when the current lyric line first became visible. */
-let lineStartAt = 0;
-/** Minimum seconds a lyric line stays visible before it can be replaced. */
-let minShowSec = 0;
-/** Maximum seconds a lyric line stays visible before it fades out. */
-let maxShowSec = 0;
-/** Timer used to fade out a line that exceeded its maximum display time. */
-let maxHideTimer = null;
-/** Snapshot of the currently displayed line (for the ghost fade layer). */
-let currentSnapshot = null;
-
-/** Reads a bound page rect for placing text within the visible area. */
-function pageBounds() {
-  return {
-    width: window.innerWidth,
-    height: window.innerHeight
-  };
-}
+/** Line keys currently on screen, ordered oldest-first (a queue). */
+let activeKeys = [];
+/** Line pool keyed by identity (line time) so re-appearing lines keep pos. */
+const linePool = new Map();
+/** Minimum ms a line stays on screen before the oldest one fades out. */
+let minShowMs = 1200;
+/** Maximum ms a line may stay on screen before it fades out (0 = no cap). */
+let maxShowMs = 0;
+/** Timer that periodically evicts lines that exceeded their max display time. */
+let maxEvictTimer = null;
+/** Safe-area insets (px) that lyric lines must avoid. */
+let safeArea = { top: 60, bottom: 60, left: 60, right: 60, center: 0 };
 
 /** Minimum angular difference between successive lyric angles (degrees). */
 const MIN_TILT_DELTA = 6;
@@ -42,130 +23,396 @@ const MIN_TILT_DELTA = 6;
 const MAX_TILT = 22;
 /** Adaptive typewriter target: a line aims to finish revealing within ~5s. */
 const ADAPTIVE_TARGET_MS = 5000;
+/** Maximum number of scattered lines shown on screen at once. */
+const MAX_LINES = 4;
 
-/**
- * Returns a readable (never near-vertical) rotation in degrees that always
- * differs from the previously used angle by at least MIN_TILT_DELTA.
- * @returns {number}
- */
-function randomTilt() {
-  const range = MAX_TILT * 2;
-  let angle = Math.random() * range - MAX_TILT;
-  // Avoid vertical (±90 lookalikes) by keeping within ±22 and nonzero.
-  if (Math.abs(angle) < 3) {
-    angle = angle < 0 ? -3 : 3;
-  }
-  if (lastTilt !== null && Math.abs(angle - lastTilt) < MIN_TILT_DELTA) {
-    // Push it to the opposite side of the previous angle for a clear difference.
-    const direction = lastTilt > 0 ? -1 : 1;
-    angle = Math.max(
-      -MAX_TILT,
-      Math.min(MAX_TILT, lastTilt + direction * MIN_TILT_DELTA * 2)
-    );
-  }
-  lastTilt = angle;
-  return angle;
+/** Reads a bound page rect for placing text within the visible area. */
+function pageBounds() {
+  return { width: window.innerWidth, height: window.innerHeight };
 }
 
-/**
- * Returns the fixed wrap width (px) for a lyric block so long lines break into
- * a few readable rows instead of being crushed into a narrow column.
- * @param {number} pageWidth
- */
+/** Returns a readable (never near-vertical) rotation in degrees. */
+function randomTilt() {
+  const angle = (Math.random() * 2 - 1) * MAX_TILT;
+  return Math.abs(angle) < 3 ? (angle < 0 ? -3 : 3) : angle;
+}
+
+/** Returns the fixed wrap width (px) for a lyric block. */
 function lineWidth(pageWidth) {
   return Math.max(220, Math.min(pageWidth * 0.7, 860));
 }
 
 /**
- * Picks a stable random position + tilt for a given line key so re-renders of
- * the same line do not cause the text to jump.
- * @param {string} key
+ * Tests whether a point overlaps the centered safe zone.
+ * @param {number} x
+ * @param {number} y
+ * @param {number} width
  */
-function placeFor(key) {
-  if (placedKey === key && placedStyle) {
-    return placedStyle;
+function inCenterZone(x, y, width) {
+  const c = Number(safeArea.center) || 0;
+  if (c <= 0) {
+    return false;
   }
   const bounds = pageBounds();
-  const width = lineWidth(bounds.width);
-  const maxY = bounds.height * 0.72 - 160;
-  const safeX = 8 + width * 0.12;
-  const x = safeX + Math.random() * Math.max(0, bounds.width - safeX * 2 - width);
-  const y = 24 + Math.random() * Math.max(60, maxY);
-  placedStyle = {
-    x: Math.max(8, Math.round(Math.min(bounds.width - width - 8, x))),
-    y: Math.max(16, Math.round(Math.min(maxY, y))),
-    tilt: randomTilt(),
-    width
-  };
-  placedKey = key;
-  return placedStyle;
+  const cx = bounds.width / 2;
+  const cy = bounds.height / 2;
+  const half = c / 2;
+  const right = x + width;
+  const bottom = y + 60; // approximate line block height
+  const overlapsX = right > cx - half && x < cx + half;
+  const overlapsY = bottom > cy - half && y < cy + half;
+  return overlapsX && overlapsY;
 }
 
 /**
- * Renders one line as a typewriter reveal (one char per interval). Left-aligned
- * and wraps to multiple rows inside the fixed-width block when the text is long.
- * Each container keeps its own interval so original + translation can reveal
- * independently without interrupting one another.
- * @param {HTMLElement} container
- * @param {string} text
+ * Picks a random position that avoids the configured safe areas (insets + the
+ * centered zone) and does not overlap lines already on screen.
+ * @param {number} width
+ * @param {{ x: number, y: number, width: number }[]} occupied
  */
-function renderLine(container, text) {
-  const priorTimer = container.typewriterTimer;
-  if (priorTimer) {
-    clearInterval(priorTimer);
-    container.typewriterTimer = null;
+function pickPosition(width, occupied) {
+  const bounds = pageBounds();
+  const top = Number(safeArea.top) || 0;
+  const bottom = Number(safeArea.bottom) || 0;
+  const left = Number(safeArea.left) || 0;
+  const right = Number(safeArea.right) || 0;
+  const usableTop = Math.min(top, bounds.height - 200);
+  const usableBottom = Math.max(usableTop + 80, bounds.height * 0.72 - bottom);
+  const usableWidth = bounds.width - left - right;
+  const across = Math.max(320, usableWidth);
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const x = Math.max(
+      left + 8,
+      Math.round(
+        Math.min(
+          bounds.width - right - width - 8,
+          left + 8 + Math.random() * Math.max(0, across - width - 16)
+        )
+      )
+    );
+    const y = Math.max(
+      usableTop + 16,
+      Math.round(usableTop + Math.random() * Math.max(40, usableBottom - usableTop - 80))
+    );
+    const overlaps = occupied.some((o) => {
+      const dx = Math.abs(x - o.x) < Math.min(width, o.width) * 0.75;
+      const dy = Math.abs(y - o.y) < 90;
+      return dx && dy;
+    });
+    if (!overlaps && !inCenterZone(x, y, width)) {
+      return { x, y, tilt: randomTilt(), width };
+    }
   }
-  if (!text) {
-    container.hidden = true;
-    container.replaceChildren();
+  // Fallback: top-left inside the usable band, outside the center zone.
+  return {
+    x: Math.max(left + 8, 12),
+    y: Math.max(usableTop + 16, 16),
+    tilt: randomTilt(),
+    width
+  };
+}
+
+/**
+ * Renders the lyric window as a queue: the current line prints, previous lines
+ * linger on screen, and the oldest line fades out only after it has stayed for
+ * minShowMs. New current lines are printed as they arrive (instead of being
+ * dropped the moment the window slides).
+ * @param {{
+ *   line: string,
+ *   translation: string,
+ *   lines: { time: number, text: string, translation: string, isCurrent: boolean }[],
+ *   showLyric: boolean
+ * }} payload
+ */
+function renderLyricWindow(payload) {
+  lastPayload = payload || null;
+  const visible = Boolean(payload?.showLyric);
+  const win = visible && Array.isArray(payload?.lines) ? payload.lines : [];
+  const now = Date.now();
+
+  if (!win.length) {
+    // Clear all lines with a fade-out.
+    for (const key of activeKeys) {
+      fadeOutLine(linePool.get(key));
+      linePool.delete(key);
+    }
+    activeKeys = [];
     return;
   }
-  container.hidden = false;
-  container.replaceChildren();
-  const source = String(text);
+
+  const fadeMs = Number(lastSettings?.floatLyricsFadeMs) || 0;
+  // Only print the current line on arrival. Neighboring lines that are already
+  // on screen stay (they were previous current lines), but we never preview the
+  // next line before it becomes current.
+  win.forEach((entry) => {
+    const key = `${entry.time}`;
+    const existing = linePool.get(key);
+    if (existing) {
+      const wasCurrent = existing.isCurrent;
+      existing.isCurrent = entry.isCurrent;
+      if (entry.isCurrent) {
+        // Restart typewrite if this line just became current (e.g. after a seek).
+        if (!wasCurrent) {
+          restartTypewrite(existing, entry);
+        }
+      }
+      return;
+    }
+    // Create a new line only when it is the current lyric; otherwise leave the
+    // next line un-rendered so it does not visually "arrive" before its turn.
+    if (entry.isCurrent) {
+      const line = createLine(key, entry, fadeMs);
+      if (line) {
+        activeKeys.push(key);
+      }
+    }
+  });
+
+  // Fade out the oldest line once it has stayed at least minShowMs, or when the
+  // queue exceeds MAX_LINES (hard cap so fast songs do not pile up lines).
+  while (
+    activeKeys.length > 1 &&
+    (activeKeys.length > MAX_LINES ||
+      now - (linePool.get(activeKeys[0])?.bornAt || now) >= minShowMs)
+  ) {
+    const oldKey = activeKeys.shift();
+    fadeOutLine(linePool.get(oldKey));
+    linePool.delete(oldKey);
+  }
+}
+
+function currentOccupied() {
+  return activeKeys
+    .map((key) => linePool.get(key))
+    .filter(Boolean)
+    .map((line) => ({ x: line.x, y: line.y, width: line.width }));
+}
+
+/** Builds a line element and starts the typewriter reveal for the current one. */
+function createLine(key, entry, fadeMs) {
+  const el = document.createElement("div");
+  el.className = `lyric-line ${entry.isCurrent ? "is-current" : "is-near"}`;
+
+  const width = lineWidth(pageBounds().width);
+  const pos = pickPosition(width, currentOccupied());
+  el.style.left = `${pos.x}px`;
+  el.style.top = `${pos.y}px`;
+  el.style.width = `${pos.width}px`;
+  el.style.setProperty("--line-tilt", `${pos.tilt}deg`);
+
+  const mode = lastSettings?.floatLyricsMode || "both";
+  // For the current line, create empty rows and let typewrite reveal them char
+  // by char (so it never flashes the full line first). For a stable neighbor,
+  // write the full static text.
+  if (entry.isCurrent) {
+    buildEmptyRows(el, mode);
+  } else {
+    renderLineText(el, entry, mode);
+  }
+
+  layerEl.appendChild(el);
+  const line = {
+    key,
+    el,
+    x: pos.x,
+    y: pos.y,
+    width: pos.width,
+    isCurrent: entry.isCurrent,
+    bornAt: Date.now(),
+    charTimer: null,
+    rawEntry: entry
+  };
+  linePool.set(key, line);
+
+  // Animate entry for all lines; current line reveals char-by-char.
+  el.classList.remove("is-entering", "is-leaving");
+  void el.offsetWidth;
+  el.classList.add("is-entering");
+  if (entry.isCurrent) {
+    typewrite(el, entry, mode, fadeMs);
+  }
+  return line;
+}
+
+/** Creates empty original/translation rows (no text) for the typewriter. */
+function buildEmptyRows(el, mode) {
+  el.replaceChildren();
+  if (mode === "translation") {
+    const row = document.createElement("div");
+    row.className = "lyric-line-row is-original";
+    el.appendChild(row);
+    return;
+  }
+  const row = document.createElement("div");
+  row.className = "lyric-line-row is-original";
+  el.appendChild(row);
+  if (mode === "both") {
+    const t = document.createElement("div");
+    t.className = "lyric-line-row is-translation";
+    el.appendChild(t);
+  }
+}
+
+/** Writes one line's text (original + translation depending on mode). */
+function renderLineText(el, entry, mode) {
+  el.replaceChildren();
+  const hasTranslation = mode === "both" && entry.translation;
+  if (mode === "translation") {
+    // Show translation; fall back to the original when no translation exists.
+    const text = entry.translation || entry.text || "";
+    el.appendChild(makeRow(text, false));
+    return;
+  }
+  el.appendChild(makeRow(entry.text || "", false));
+  if (hasTranslation) {
+    el.appendChild(makeRow(entry.translation || "", true));
+  }
+}
+
+/** Creates a text row span for one lyric line. */
+function makeRow(text, isTranslation) {
+  const row = document.createElement("div");
+  row.className = `lyric-line-row ${isTranslation ? "is-translation" : "is-original"}`;
+  row.textContent = text;
+  return row;
+}
+
+/**
+ * Restarts the typewriter reveal for a line that just became current (e.g. after
+ * a seek where playback moved onto this line). Clears any prior timers first.
+ * @param {{ el: HTMLElement, rawEntry: object }} line
+ * @param {object} entry
+ */
+function restartTypewrite(line, entry) {
+  const el = line.el;
+  el.querySelectorAll(".lyric-line-row").forEach((row) => {
+    if (row.typewriterTimer) {
+      clearInterval(row.typewriterTimer);
+      row.typewriterTimer = null;
+    }
+  });
+  const mode = lastSettings?.floatLyricsMode || "both";
+  buildEmptyRows(el, mode);
+  const fadeMs = Number(lastSettings?.floatLyricsFadeMs) || 0;
+  typewrite(el, entry, mode, fadeMs);
+}
+
+/**
+ * Typewrites the current line char by char. The translation row reveals too, but
+ * keeps its own pacing so original + translation do not interrupt each other.
+ * @param {HTMLElement} el
+ * @param {{ text: string, translation: string }} entry
+ * @param {"both"|"original"|"translation"} mode
+ * @param {number} fadeMs
+ */
+function typewrite(el, entry, mode, fadeMs) {
+  let rowEl = el.querySelector(".lyric-line-row.is-original");
+  let transEl = el.querySelector(".lyric-line-row.is-translation");
+  const source = entry.text || "";
   const freq = Number(lastSettings?.floatLyricsTremorFrequency) || 8;
   const baseInterval = Number(lastSettings?.floatLyricsCharInterval) || 0.1;
   const durationMs = `${1000 / freq}ms`;
-  let index = 0;
 
-  // Adaptive typewriter: when enabled, a long line reveals faster so it does not
-  // drag past a target duration; short lines keep the user's base interval. The
-  // interval never steps below the 0.01s floor or above the user's base interval.
   let interval = baseInterval;
-  if (lastSettings?.floatLyricsAdaptiveSpeed) {
-    const chars = source.length;
-    if (chars > 0) {
-      const adaptive = ADAPTIVE_TARGET_MS / 1000 / chars;
-      interval = Math.max(0.01, Math.min(baseInterval, adaptive));
-    }
+  if (lastSettings?.floatLyricsAdaptiveSpeed && source.length > 0) {
+    const adaptive = ADAPTIVE_TARGET_MS / 1000 / source.length;
+    interval = Math.max(0.01, Math.min(baseInterval, adaptive));
   }
 
-  /** Appends the next character span to the line container. */
+  if (mode === "translation") {
+    // Only translation is shown; it occupies the original row slot (or the only
+    // row). Reveal it char by char, falling back to the original text.
+    const target = rowEl || transEl || el.firstElementChild;
+    if (transEl && transEl !== target) {
+      transEl.hidden = true;
+    }
+    const text = entry.translation || entry.text || "";
+    typewriteRow(target, text, interval, durationMs, () => {});
+    return;
+  }
+
+  const rowsToType = [];
+  if (rowEl) {
+    rowsToType.push({ el: rowEl, text: entry.text || "" });
+  }
+  if (transEl && mode === "both") {
+    rowsToType.push({ el: transEl, text: entry.translation || "" });
+  }
+  // Fallback: if no is-original row exists (e.g. unusual mode), type the first row.
+  if (!rowsToType.length && el.firstElementChild) {
+    rowsToType.push({ el: el.firstElementChild, text: entry.text || entry.translation || "" });
+  }
+
+  // For "both", reveal rows sequentially so they do not interleave.
+  let ri = 0;
+  function nextRow() {
+    if (ri >= rowsToType.length) {
+      return;
+    }
+    const { el: rxEl, text } = rowsToType[ri];
+    ri += 1;
+    typewriteRow(rxEl, text, interval, durationMs, nextRow);
+  }
+  nextRow();
+}
+
+/** Appends chars to a row at the given interval, then runs onDone. */
+function typewriteRow(row, text, intervalSec, durationMs, onDone) {
+  if (!row || !text) {
+    onDone?.();
+    return;
+  }
+  const source = String(text);
+  let index = 0;
+  row.textContent = "";
   function pushNext() {
     if (index >= source.length) {
-      if (container.typewriterTimer) {
-        clearInterval(container.typewriterTimer);
-        container.typewriterTimer = null;
-      }
+      onDone?.();
       return;
     }
     const char = source[index];
     index += 1;
     const span = document.createElement("span");
-    // Whitespace needs to be preserved by wrapping; keep a space glyph inline.
     span.className = `char font-seg-${window.classifyScript(char)}`;
     span.textContent = char;
     span.style.animationDelay = `${Math.random() * 100}ms`;
     span.style.animationDuration = durationMs;
-    container.appendChild(span);
+    row.appendChild(span);
   }
-
   pushNext();
-  container.typewriterTimer = setInterval(pushNext, interval * 1000);
+  const timer = setInterval(pushNext, intervalSec * 1000);
+  row.typewriterTimer = timer;
+}
+
+/** Fades a line out (right-to-left per char) and removes it. */
+function fadeOutLine(line) {
+  if (!line) {
+    return;
+  }
+  const el = line.el;
+  if (line.charTimer) {
+    clearTimeout(line.charTimer);
+  }
+  const chars = el.querySelectorAll(".char");
+  const count = chars.length;
+  const fadeMs = Number(lastSettings?.floatLyricsFadeMs) || 0;
+  const step = count > 1 ? fadeMs / count : 0;
+  chars.forEach((char, index) => {
+    // index 0 is leftmost; leftmost should have the smallest delay so the line
+    // disappears left-to-right.
+    char.style.setProperty("--char-delay", `${index * step}ms`);
+    char.classList.add("is-exiting");
+  });
+  el.classList.remove("is-entering");
+  el.classList.add("is-leaving");
+  setTimeout(() => {
+    el.remove();
+  }, fadeMs + (count * step) + 60);
 }
 
 /**
- * Applies settings (mode, tremor amplitude/frequency, color, size, fade) to overlay.
+ * Applies settings to the overlay and re-renders the current window.
  * @param {object} settings
  */
 function applySettings(settings) {
@@ -183,199 +430,50 @@ function applySettings(settings) {
   root.style.setProperty("--lyric-font-size", `${size}px`);
   const fade = Number(settings?.floatLyricsFadeMs) || 0;
   root.style.setProperty("--lyric-fade-ms", `${fade}ms`);
-  minShowSec = (Number(settings?.floatLyricsMinShowMs) || 0) / 1000;
-  maxShowSec = (Number(settings?.floatLyricsMaxShowMs) || 0) / 1000;
-  // Disable per-char tremor entirely when amplitude is 0 so it costs nothing.
-  root.classList.toggle("is-tremor-off", amp <= 0);
-  if (lastPayload) {
-    renderLines(lastPayload);
-  }
-}
-
-/**
- * Clones the previous line into a fading ghost layer so it lingers briefly
- * while the next line appears, instead of vanishing instantly.
- * @param {object|null} snapshot
- */
-function spawnGhost(snapshot) {
-  if (!snapshot) {
-    return;
-  }
-  ghostEl.style.left = `${snapshot.x}px`;
-  ghostEl.style.top = `${snapshot.y}px`;
-  ghostEl.style.width = `${snapshot.width}px`;
-  ghostEl.style.setProperty("--ghost-tilt", `${snapshot.tilt}deg`);
-  ghostEl.replaceChildren();
-  for (const row of snapshot.rows) {
-    const line = document.createElement("div");
-    line.className = `lyric-line ${row.isTranslation ? "is-translation" : "is-original"}`;
-    if (row.html) {
-      line.innerHTML = row.html;
-    } else {
-      line.hidden = true;
-    }
-    ghostEl.appendChild(line);
-  }
-  // Force reflow then restart the fade-out animation.
-  ghostEl.classList.remove("is-ghost");
-  void ghostEl.offsetWidth;
-  ghostEl.classList.add("is-ghost");
-}
-
-/**
- * Places and renders a lyric block at a stable random position/tilt.
- * @param {string} key
- * @param {string} line
- * @param {string} translation
- * @param {"both"|"original"|"translation"} mode
- */
-function applyLine(key, line, translation, mode) {
-  const anchor = placeFor(key);
-  // Briefly keep the previous line visible (ghost fade) while the new one enters.
-  spawnGhost(renderedKey && renderedKey !== key ? currentSnapshot : null);
-  blockEl.style.left = `${anchor.x}px`;
-  blockEl.style.top = `${anchor.y}px`;
-  blockEl.style.width = `${anchor.width}px`;
-  blockEl.style.setProperty("--line-tilt", `${anchor.tilt}deg`);
-
-  if (mode === "both") {
-    renderLine(originalEl, line);
-    renderLine(translationEl, translation);
-  } else if (mode === "original") {
-    renderLine(originalEl, line);
-    translationEl.replaceChildren();
-    translationEl.hidden = true;
-  } else {
-    renderLine(originalEl, translation);
-    translationEl.replaceChildren();
-    translationEl.hidden = true;
-  }
-
-  const targets = mode === "both" ? [originalEl, translationEl] : [originalEl];
-  for (const el of targets) {
-    el.classList.remove("is-entering", "is-leaving");
-    void el.offsetWidth;
-    el.classList.add("is-entering");
-  }
-  renderedKey = key;
-
-  // Remember the current line (markup + placement) so the next change can clone
-  // it into the fading ghost layer with identical typography and wrapping.
-  const rows = [];
-  if (mode === "translation") {
-    rows.push({ html: translationEl.innerHTML || "", isTranslation: true });
-  } else {
-    rows.push({ html: originalEl.innerHTML || "", isTranslation: false });
-    if (mode === "both" && translation) {
-      rows.push({ html: translationEl.innerHTML || "", isTranslation: true });
-    }
-  }
-  currentSnapshot = {
-    key,
-    x: anchor.x,
-    y: anchor.y,
-    width: anchor.width,
-    tilt: anchor.tilt,
-    rows
+  minShowMs = Number(settings?.floatLyricsMinShowMs) || 0;
+  maxShowMs = Number(settings?.floatLyricsMaxShowMs) || 0;
+  safeArea = {
+    top: Number(settings?.floatLyricsSafeArea?.top) || 0,
+    bottom: Number(settings?.floatLyricsSafeArea?.bottom) || 0,
+    left: Number(settings?.floatLyricsSafeArea?.left) || 0,
+    right: Number(settings?.floatLyricsSafeArea?.right) || 0,
+    center: Number(settings?.floatLyricsSafeArea?.center) || 0
   };
-
-  // Track when this line became visible and schedule a max-time fade-out.
-  lineStartAt = Date.now();
-  if (maxHideTimer) {
-    clearTimeout(maxHideTimer);
-    maxHideTimer = null;
-  }
-  if (maxShowSec > 0) {
-    maxHideTimer = setTimeout(() => {
-      if (renderedKey === key && Date.now() - lineStartAt >= maxShowSec * 1000) {
-        for (const el of [originalEl, translationEl]) {
-          if (!el.hidden) {
-            el.classList.remove("is-entering");
-            el.classList.add("is-leaving");
-          }
-        }
-      }
-      maxHideTimer = null;
-    }, maxShowSec * 1000);
+  root.classList.toggle("is-tremor-off", amp <= 0);
+  syncMaxEvictTimer();
+  // Keep up to MAX_LINES visible: extend the incoming window if fewer lines.
+  if (lastPayload) {
+    renderLyricWindow(lastPayload);
   }
 }
 
-/**
- * Fades out the currently shown line without replacing it (used when a line is
- * hidden or its max display time elapsed).
- * @param {"both"|"original"|"translation"} mode
- */
-function fadeOutCurrent(mode) {
-  const targets = mode === "both" ? [originalEl, translationEl] : [originalEl];
-  for (const el of targets) {
-    if (!el.hidden) {
-      el.classList.remove("is-entering");
-      el.classList.add("is-leaving");
-    }
+/** Starts/stops the periodic max-display-time eviction timer. */
+function syncMaxEvictTimer() {
+  if (maxEvictTimer) {
+    clearInterval(maxEvictTimer);
+    maxEvictTimer = null;
+  }
+  if (maxShowMs > 0) {
+    maxEvictTimer = setInterval(() => {
+      evictOverMaxLines();
+    }, Math.min(maxShowMs, 500));
   }
 }
 
-/**
- * Renders the lyric payload into the anchored block. Long lines wrap to rows
- * inside a fixed width; original + translation stack and share the same tilt.
- * Respects min/max display time before swapping or hiding a line.
- * @param {{ line?: string, translation?: string, showLyric?: boolean }} payload
- */
-function renderLines(payload) {
-  lastPayload = payload || null;
-  const mode = lastSettings?.floatLyricsMode || "both";
-  const line = payload?.line || "";
-  const translation = payload?.translation || "";
-  const visible = Boolean(payload?.showLyric && (line || translation));
-  const key = `${line}|${translation}|${mode}`;
-
-  if (!visible) {
-    placedKey = "";
-    placedStyle = null;
-    renderedKey = "";
-    if (swapTimer) {
-      clearTimeout(swapTimer);
-      swapTimer = null;
-    }
-    if (originalEl.typewriterTimer) {
-      clearInterval(originalEl.typewriterTimer);
-      originalEl.typewriterTimer = null;
-    }
-    if (translationEl.typewriterTimer) {
-      clearInterval(translationEl.typewriterTimer);
-      translationEl.typewriterTimer = null;
-    }
-    if (maxHideTimer) {
-      clearTimeout(maxHideTimer);
-      maxHideTimer = null;
-    }
-    originalEl.replaceChildren();
-    translationEl.replaceChildren();
-    originalEl.hidden = true;
-    translationEl.hidden = true;
-    return;
+/** Fades out and removes any line that has exceeded the max display time. */
+function evictOverMaxLines() {
+  const now = Date.now();
+  const stale = activeKeys.filter((key) => {
+    const line = linePool.get(key);
+    return line && now - line.bornAt >= maxShowMs;
+  });
+  for (const key of stale) {
+    activeKeys = activeKeys.filter((k) => k !== key);
+    fadeOutLine(linePool.get(key));
+    linePool.delete(key);
   }
-
-  // Same line as shown already (e.g. play-state tick): just keep it as-is.
-  if (key === renderedKey) {
-    return;
-  }
-
-  const fade = Number(lastSettings?.floatLyricsFadeMs) || 0;
-  const elapsed = Date.now() - lineStartAt;
-  // Hold the current line until its minimum display time has elapsed before
-  // swapping in the next one, so brief lines do not flash past too quickly.
-  const waitMs = Math.max(0, minShowSec * 1000 - elapsed);
-
-  if (swapTimer) {
-    clearTimeout(swapTimer);
-  }
-  swapTimer = setTimeout(() => {
-    applyLine(key, line, translation, mode);
-    swapTimer = null;
-  }, waitMs + fade);
 }
 
 api.getSettings().then(applySettings);
 api.onSettingsChanged(applySettings);
-api.onLyric(renderLines);
+api.onLyric(renderLyricWindow);

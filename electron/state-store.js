@@ -28,6 +28,8 @@ const MAX_FLOAT_LYRICS_CHAR_INTERVAL = 1;
 const MAX_FLOAT_LYRICS_MIN_SHOW_MS = 30000;
 /** Max maximum-display time for a lyric line (ms). */
 const MAX_FLOAT_LYRICS_MAX_SHOW_MS = 60000;
+/** Max safe-area inset for a floating lyric edge (px). */
+const MAX_SAFE_AREA = 400;
 
 const STATE_VERSION = 2;
 
@@ -83,7 +85,9 @@ const DEFAULT_SETTINGS = {
   /** Maximum ms a lyric line can stay visible before it fades out (0 = no cap). */
   floatLyricsMaxShowMs: 0,
   /** Auto-adjust typewriter speed by line length (long lines reveal faster). */
-  floatLyricsAdaptiveSpeed: true
+  floatLyricsAdaptiveSpeed: true,
+  /** Safe-area insets that lyric lines must avoid (px). center = square side. */
+  floatLyricsSafeArea: { top: 60, bottom: 60, left: 60, right: 60, center: 0 }
 };
 
 const DEFAULT_FLOAT_SIZE = {
@@ -280,7 +284,8 @@ function validateSettings(settings) {
     floatLyricsAdaptiveSpeed:
       typeof settings.floatLyricsAdaptiveSpeed === "boolean"
         ? settings.floatLyricsAdaptiveSpeed
-        : DEFAULT_SETTINGS.floatLyricsAdaptiveSpeed
+        : DEFAULT_SETTINGS.floatLyricsAdaptiveSpeed,
+    floatLyricsSafeArea: normalizeFloatLyricsSafeArea(settings.floatLyricsSafeArea)
   };
 }
 
@@ -394,6 +399,26 @@ function clampFloatLyricsMaxShowMs(value) {
 }
 
 /**
+ * Normalizes the floating lyric safe-area into clamped px values.
+ * @param {unknown} value
+ */
+function normalizeFloatLyricsSafeArea(value) {
+  const src = value && typeof value === "object" ? value : {};
+  const fallback = DEFAULT_SETTINGS.floatLyricsSafeArea;
+  const clamp = (v, fb) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(MAX_SAFE_AREA, Math.max(0, Math.round(n))) : fb;
+  };
+  return {
+    top: clamp(src.top, fallback.top),
+    bottom: clamp(src.bottom, fallback.bottom),
+    left: clamp(src.left, fallback.left),
+    right: clamp(src.right, fallback.right),
+    center: clamp(src.center, fallback.center)
+  };
+}
+
+/**
  * Accepts #rgb / #rrggbb or falls back to the default hex.
  * @param {unknown} value
  * @param {string} fallback
@@ -443,6 +468,7 @@ module.exports = {
   MAX_FLOAT_LYRICS_CHAR_INTERVAL,
   MAX_FLOAT_LYRICS_MIN_SHOW_MS,
   MAX_FLOAT_LYRICS_MAX_SHOW_MS,
+  MAX_SAFE_AREA,
   createStateStore,
   validateSettings,
   validateFloatSize,
@@ -453,5 +479,6 @@ module.exports = {
   clampFloatLyricsFadeMs,
   clampFloatLyricsCharInterval,
   clampFloatLyricsMinShowMs,
-  clampFloatLyricsMaxShowMs
+  clampFloatLyricsMaxShowMs,
+  normalizeFloatLyricsSafeArea
 };

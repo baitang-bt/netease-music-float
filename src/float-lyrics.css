@@ -31,49 +31,15 @@ body {
   overflow: hidden;
 }
 
-/* One anchored block: rotates together and stacks original + translation rows. */
-.lyric-block {
+/* Fullscreen container holding independently-placed lyric lines. */
+.lyric-layer {
   position: absolute;
-  left: 0;
-  top: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.35em;
-  transform: rotate(var(--line-tilt, 0deg));
-  transform-origin: top left;
-  pointer-events: none;
+  inset: 0;
 }
 
-/* Ghost layer holds the previous line briefly while the new line appears. */
-.ghost-block {
-  position: absolute;
-  left: 0;
-  top: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.35em;
-  transform: rotate(var(--ghost-tilt, 0deg));
-  transform-origin: top left;
-  pointer-events: none;
-  opacity: 0;
-}
-
-.ghost-block.is-ghost {
-  animation: lyric-out-right var(--lyric-fade-ms) ease-in forwards;
-}
-
-.ghost-block .lyric-line {
-  opacity: 1;
-}
-
-/* The ghost is a static echo: suppress per-char tremor so it fades cleanly. */
-.ghost-block .lyric-line .char {
-  animation: none;
-}
-
+/* Each lyric line is absolutely positioned at its own random x/y/tilt. */
 .lyric-line {
+  position: absolute;
   max-width: 100%;
   padding: 0.1em 0.9em;
   text-align: left;
@@ -88,20 +54,27 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   opacity: 0;
+  transform: rotate(var(--line-tilt, 0deg));
+  transform-origin: top left;
 }
 
-.lyric-line.is-original {
+.lyric-line.is-current,
+.lyric-line.is-near {
+  opacity: 1;
+}
+
+/* Rows inside a line: original is larger, translation is smaller and dimmer. */
+.lyric-line-row.is-original {
   font-size: var(--lyric-font-size);
   letter-spacing: 0.02em;
 }
 
-.lyric-line.is-translation {
+.lyric-line-row.is-translation {
   font-size: calc(var(--lyric-font-size) * 0.66);
   font-weight: 600;
 }
 
-/* Per-character tremor / float. Each char is wrapped in a span and given a
-   random delay + duration so adjacent glyphs do not move in lockstep. */
+/* Per-character tremor / float. */
 .lyric-line .char {
   display: inline-block;
   white-space: pre;
@@ -111,6 +84,12 @@ body {
 /* Amplitude 0 disables the per-char tremor entirely. */
 html.is-tremor-off .lyric-line .char {
   animation: none;
+}
+
+/* Left-to-right per-character exit (used when a line leaves the window). */
+.lyric-line .char.is-exiting {
+  animation: ghost-char-out var(--lyric-fade-ms) ease-in both;
+  animation-delay: var(--char-delay, 0s);
 }
 
 @keyframes tremor {
@@ -131,7 +110,18 @@ html.is-tremor-off .lyric-line .char {
   }
 }
 
-/* Fade the line in on entry; a later fade-out can be applied via .is-leaving. */
+@keyframes ghost-char-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(0.35em);
+  }
+}
+
+/* Line entry / exit fade. */
 .lyric-line.is-entering {
   animation: lyric-in var(--lyric-fade-ms) ease-out both;
 }
@@ -158,20 +148,6 @@ html.is-tremor-off .lyric-line .char {
   }
 }
 
-/* Previous line disappears from right to left: the right edge is wiped inward
-   while the whole block fades out. Rotation (from --ghost-tilt) is preserved
-   because we only animate clip-path + opacity, never transform. */
-@keyframes lyric-out-right {
-  from {
-    opacity: 1;
-    clip-path: inset(0 0 0 0);
-  }
-  to {
-    opacity: 0;
-    clip-path: inset(0 100% 0 0);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .lyric-line .char {
     animation: none;
@@ -180,9 +156,5 @@ html.is-tremor-off .lyric-line .char {
   .lyric-line.is-leaving {
     animation: none;
     opacity: 1;
-  }
-  .ghost-block {
-    animation: none;
-    opacity: 0;
   }
 }

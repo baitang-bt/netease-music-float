@@ -37,7 +37,9 @@ const {
   MAX_FLOAT_LYRICS_FADE_MS,
   MAX_FLOAT_LYRICS_CHAR_INTERVAL,
   MAX_FLOAT_LYRICS_MIN_SHOW_MS,
-  MAX_FLOAT_LYRICS_MAX_SHOW_MS
+  MAX_FLOAT_LYRICS_MAX_SHOW_MS,
+  MAX_SAFE_AREA,
+  normalizeFloatLyricsSafeArea
 } = require("../electron/state-store");
 
 describe("fft", () => {
@@ -435,5 +437,20 @@ describe("float lyrics settings", () => {
     });
     assert.equal(settings.floatLyricsMode, "original");
     assert.equal(settings.floatLyricsColor, "#ffffff");
+  });
+
+  it("normalizes and clamps the safe-area insets", () => {
+    const fallback = validateSettings({}).floatLyricsSafeArea;
+    assert.deepEqual(fallback, { top: 60, bottom: 60, left: 60, right: 60, center: 0 });
+    const clamped = normalizeFloatLyricsSafeArea({
+      top: 9999,
+      left: -5,
+      center: 250
+    });
+    assert.equal(clamped.top, MAX_SAFE_AREA);
+    assert.equal(clamped.left, 0);
+    assert.equal(clamped.center, 250);
+    const missing = normalizeFloatLyricsSafeArea(undefined);
+    assert.deepEqual(missing, fallback);
   });
 });

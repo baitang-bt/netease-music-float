@@ -4,6 +4,7 @@ const {
   parseLrc,
   lyricLineAt,
   lyricEntryAt,
+  lyricWindowAt,
   attachTranslations,
   isMetaLyricLine,
   createLyricsController
@@ -77,9 +78,63 @@ describe("lyrics", () => {
     assert.deepEqual(controller.getLastPayload(), {
       line: "",
       translation: "",
+      lines: [],
       instrumental: false,
       songId: null,
       showLyric: false
     });
+  });
+
+  it("returns current line plus neighbors with isCurrent flag", () => {
+    const lines = parseLrc("[00:00.00]A\n[00:10.00]B\n[00:20.00]C\n[00:30.00]D\n");
+    const windowLines = lyricWindowAt(lines, 15, 1);
+    assert.deepEqual(
+      windowLines.map((l) => [l.text, l.isCurrent]),
+      [
+        ["A", false],
+        ["B", true],
+        ["C", false]
+      ]
+    );
+  });
+
+  it("clamps the window at the boundaries", () => {
+    const lines = parseLrc("[00:00.00]A\n[00:10.00]B\n");
+    const atStart = lyricWindowAt(lines, 1, 1);
+    assert.deepEqual(
+      atStart.map((l) => [l.text, l.isCurrent]),
+      [
+        ["A", true],
+        ["B", false]
+      ]
+    );
+    const atEnd = lyricWindowAt(lines, 40, 1);
+    assert.deepEqual(
+      atEnd.map((l) => [l.text, l.isCurrent]),
+      [
+        ["A", false],
+        ["B", true]
+      ]
+    );
+  });
+
+  it("returns an empty window before the first lyric timestamp", () => {
+    const lines = parseLrc("[00:05.00]A\n[00:10.00]B\n");
+    assert.deepEqual(lyricWindowAt(lines, 0, 1), []);
+    assert.deepEqual(lyricWindowAt(lines, 4.9, 1), []);
+    const atFirst = lyricWindowAt(lines, 5, 1);
+    assert.equal(atFirst.find((l) => l.isCurrent).text, "A");
+  });
+
+  it("carries translation into window lines", () => {
+    const lines = [
+      { time: 0, text: "Hello", translation: "你好" },
+      { time: 10, text: "World", translation: "世界" }
+    ];
+    const windowLines = lyricWindowAt(lines, 11, 0);
+    assert.equal(windowLines.length, 1);
+    assert.equal(windowLines[0].text, "World");
+    assert.equal(windowLines[0].translation, "世界");
+    assert.equal(windowLines[0].isCurrent, true);
   });
 });

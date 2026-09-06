@@ -1,6 +1,6 @@
 {
   "name": "netease-music-float",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Floating Now Playing widget for macOS and Windows music players.",
   "author": "baitang-bt",

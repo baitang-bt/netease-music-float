@@ -55,6 +55,16 @@ const floatLyricsMinShowLabel = document.querySelector("#float-lyrics-min-show-l
 const floatLyricsMaxShowInput = document.querySelector("#float-lyrics-max-show");
 const floatLyricsMaxShowLabel = document.querySelector("#float-lyrics-max-show-label");
 const floatLyricsAdaptiveInput = document.querySelector("#float-lyrics-adaptive");
+const floatLyricsSafeTopInput = document.querySelector("#float-lyrics-safe-top");
+const floatLyricsSafeBottomInput = document.querySelector("#float-lyrics-safe-bottom");
+const floatLyricsSafeLeftInput = document.querySelector("#float-lyrics-safe-left");
+const floatLyricsSafeRightInput = document.querySelector("#float-lyrics-safe-right");
+const floatLyricsSafeCenterInput = document.querySelector("#float-lyrics-safe-center");
+const floatLyricsSafeTopLabel = document.querySelector("#float-lyrics-safe-top-label");
+const floatLyricsSafeBottomLabel = document.querySelector("#float-lyrics-safe-bottom-label");
+const floatLyricsSafeLeftLabel = document.querySelector("#float-lyrics-safe-left-label");
+const floatLyricsSafeRightLabel = document.querySelector("#float-lyrics-safe-right-label");
+const floatLyricsSafeCenterLabel = document.querySelector("#float-lyrics-safe-center-label");
 
 const DEFAULT_WINDOW_COLOR = "#24242a";
 const DEFAULT_SPECTRUM_COLOR = "#e60026";
@@ -467,6 +477,20 @@ function renderSettings(settings) {
   floatLyricsMaxShowLabel.textContent =
     maxShowSec > 0 ? `${fmt1(maxShowSec)}s` : window.t("settings.floatLyrics.unlimited");
   floatLyricsAdaptiveInput.checked = settings.floatLyricsAdaptiveSpeed !== false;
+  const safe = settings.floatLyricsSafeArea || {};
+  const safeFields = [
+    [floatLyricsSafeTopInput, floatLyricsSafeTopLabel, safe.top, "top"],
+    [floatLyricsSafeBottomInput, floatLyricsSafeBottomLabel, safe.bottom, "bottom"],
+    [floatLyricsSafeLeftInput, floatLyricsSafeLeftLabel, safe.left, "left"],
+    [floatLyricsSafeRightInput, floatLyricsSafeRightLabel, safe.right, "right"],
+    [floatLyricsSafeCenterInput, floatLyricsSafeCenterLabel, safe.center, "center"]
+  ];
+  for (const [input, label, val] of safeFields) {
+    const n = Number(val);
+    const v = Number.isFinite(n) ? n : 0;
+    input.value = String(v);
+    label.textContent = `${v}px`;
+  }
 
   if (lastUpdateStatus) {
     renderUpdateStatus(lastUpdateStatus);
@@ -644,6 +668,39 @@ floatLyricsMaxShowInput.addEventListener("input", (event) => {
 
 floatLyricsAdaptiveInput.addEventListener("change", (event) => {
   api.updateSettings({ floatLyricsAdaptiveSpeed: event.target.checked });
+});
+
+/** Reads all safe-area slider values and applies them as one settings update. */
+function pushSafeArea() {
+  const safe = {
+    top: Number(floatLyricsSafeTopInput.value) || 0,
+    bottom: Number(floatLyricsSafeBottomInput.value) || 0,
+    left: Number(floatLyricsSafeLeftInput.value) || 0,
+    right: Number(floatLyricsSafeRightInput.value) || 0,
+    center: Number(floatLyricsSafeCenterInput.value) || 0
+  };
+  api.updateSettings({ floatLyricsSafeArea: safe });
+}
+
+floatLyricsSafeTopInput.addEventListener("input", () => {
+  floatLyricsSafeTopLabel.textContent = `${floatLyricsSafeTopInput.value}px`;
+  pushSafeArea();
+});
+floatLyricsSafeBottomInput.addEventListener("input", () => {
+  floatLyricsSafeBottomLabel.textContent = `${floatLyricsSafeBottomInput.value}px`;
+  pushSafeArea();
+});
+floatLyricsSafeLeftInput.addEventListener("input", () => {
+  floatLyricsSafeLeftLabel.textContent = `${floatLyricsSafeLeftInput.value}px`;
+  pushSafeArea();
+});
+floatLyricsSafeRightInput.addEventListener("input", () => {
+  floatLyricsSafeRightLabel.textContent = `${floatLyricsSafeRightInput.value}px`;
+  pushSafeArea();
+});
+floatLyricsSafeCenterInput.addEventListener("input", () => {
+  floatLyricsSafeCenterLabel.textContent = `${floatLyricsSafeCenterInput.value}px`;
+  pushSafeArea();
 });
 
 windowColorInput.addEventListener("input", (event) => {

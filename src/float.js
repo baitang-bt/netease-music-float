@@ -580,7 +580,7 @@ setupControls();
  * }} payload
  */
 function renderLyric(payload) {
-  if (payload?.showLyric && payload.line) {
+  if (payload?.line) {
     showingLyric = true;
     window.renderMultilingualText(els.titleText, payload.line);
     els.title.classList.add("is-lyric");

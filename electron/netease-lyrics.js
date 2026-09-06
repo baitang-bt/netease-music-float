@@ -152,6 +152,44 @@ function lyricLineAt(lines, elapsedSec) {
 }
 
 /**
+ * Returns the active line plus nearby lines (±radius) around the playback time.
+ * Each element marks whether it is the current line, so the renderer can show
+ * several lines scattered on screen at once.
+ * @param {{ time: number, text: string, translation?: string }[]} lines
+ * @param {number} elapsedSec
+ * @param {number} [radius]
+ * @returns {{ time: number, text: string, translation: string, isCurrent: boolean }[]}
+ */
+function lyricWindowAt(lines, elapsedSec, radius = 1) {
+  if (!lines || !lines.length) {
+    return [];
+  }
+  const t = Math.max(0, Number(elapsedSec) || 0);
+  let idx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].time <= t + 0.05) {
+      idx = i;
+    } else {
+      break;
+    }
+  }
+  // Before the first line's timestamp, no line is current yet. Return empty so
+  // the renderer does not show the first lyric early.
+  if (idx < 0) {
+    return [];
+  }
+  const safe = idx;
+  const start = Math.max(0, safe - radius);
+  const end = Math.min(lines.length, safe + radius + 1);
+  return lines.slice(start, end).map((line, offset) => ({
+    time: line.time,
+    text: line.text || "",
+    translation: line.translation || "",
+    isCurrent: start + offset === safe
+  }));
+}
+
+/**
  * Pairs each lyric line with the translated line sharing its timestamp.
  * Timestamps may drift slightly between the two LRCs, so nearby lines match.
  * @param {{ time: number, text: string }[]} lines
@@ -253,6 +291,7 @@ function createLyricsController(options) {
   let lastPayload = {
     line: "",
     translation: "",
+    lines: [],
     instrumental: false,
     songId: null,
     showLyric: false
@@ -263,6 +302,7 @@ function createLyricsController(options) {
    * @param {{
    *   line: string,
    *   translation: string,
+   *   lines: { time: number, text: string, translation: string, isCurrent: boolean }[],
    *   instrumental: boolean,
    *   songId: number|null,
    *   showLyric: boolean
@@ -270,7 +310,10 @@ function createLyricsController(options) {
    */
   function emit(payload) {
     lastPayload = payload;
-    const fingerprint = `${payload.showLyric}|${payload.line}|${payload.translation}|${payload.instrumental}`;
+    const windowFp = (payload.lines || [])
+      .map((l) => `${l.isCurrent ? 1 : 0}:${l.text}`)
+      .join("|");
+    const fingerprint = `${payload.showLyric}|${windowFp}|${payload.instrumental}`;
     if (fingerprint === lastEmitted) {
       return;
     }
@@ -292,11 +335,13 @@ function createLyricsController(options) {
         cache.lines?.length
     );
     const elapsed = estimateElapsed(track);
-    const entry = showLyric ? lyricEntryAt(cache.lines, elapsed) : null;
-    const line = entry?.text || "";
+    const windowLines = showLyric ? lyricWindowAt(cache.lines, elapsed, 1) : [];
+    const current = windowLines.find((l) => l.isCurrent) || null;
+    const line = current?.text || "";
     emit({
       line,
-      translation: line ? entry?.translation || "" : "",
+      translation: line ? current?.translation || "" : "",
+      lines: windowLines,
       instrumental,
       songId: cache?.songId || null,
       showLyric: showLyric && Boolean(line)
@@ -315,6 +360,7 @@ function createLyricsController(options) {
       emit({
         line: "",
         translation: "",
+        lines: [],
         instrumental: false,
         songId: null,
         showLyric: false
@@ -349,6 +395,7 @@ function createLyricsController(options) {
       emit({
         line: "",
         translation: "",
+        lines: [],
         instrumental: false,
         songId: null,
         showLyric: false
@@ -423,6 +470,7 @@ module.exports = {
   parseLrc,
   lyricLineAt,
   lyricEntryAt,
+  lyricWindowAt,
   attachTranslations,
   isMetaLyricLine,
   fetchLyricPayload,
