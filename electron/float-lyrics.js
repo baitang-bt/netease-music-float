@@ -3,6 +3,7 @@
 const path = require("node:path");
 const { BrowserWindow, screen } = require("electron");
 const { applyWindowStackLevel } = require("./lyric-overlay");
+const { setWindowFrame, toNativeBounds } = require("./window-geometry");
 
 /** Floating lyrics stay above fullscreen apps, just like the panel lyric overlay. */
 const FLOAT_LYRICS_ALWAYS_ON_TOP_LEVEL = "screen-saver";
@@ -51,7 +52,7 @@ function createFloatLyricsController({ getSettings, onLyricsReady }) {
       return;
     }
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    window.setBounds(display.bounds, false);
+    setWindowFrame(window, display.bounds);
   }
 
   /** Refits the window whenever a display is added/removed/resized. */
@@ -97,8 +98,12 @@ function createFloatLyricsController({ getSettings, onLyricsReady }) {
   /** Creates the floating lyric window the first time the feature is enabled. */
   function createWindow() {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const frame = toNativeBounds(display.bounds);
+    if (!frame) {
+      return;
+    }
     window = new BrowserWindow({
-      ...display.bounds,
+      ...frame,
       title: "网易云浮窗歌词",
       transparent: true,
       frame: false,

@@ -2,6 +2,7 @@
 
 const path = require("node:path");
 const { BrowserWindow } = require("electron");
+const { setWindowFrame, toNativeBounds } = require("./window-geometry");
 
 /** Spectrum / chrome window sits below the desktop pet (`status`). */
 const SPECTRUM_ALWAYS_ON_TOP_LEVEL = "main-menu";
@@ -101,7 +102,7 @@ function createLyricOverlayController({
     if (!overlay || overlay.isDestroyed() || !floatWindow || floatWindow.isDestroyed()) {
       return;
     }
-    overlay.setBounds(floatWindow.getBounds(), false);
+    setWindowFrame(overlay, floatWindow.getBounds());
   }
 
   /**
@@ -155,7 +156,10 @@ function createLyricOverlayController({
     if (!floatWindow || floatWindow.isDestroyed()) {
       return;
     }
-    const bounds = floatWindow.getBounds();
+    const bounds = toNativeBounds(floatWindow.getBounds());
+    if (!bounds) {
+      return;
+    }
     overlay = new BrowserWindow({
       ...bounds,
       title: "网易云浮窗歌词",

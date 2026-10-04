@@ -149,6 +149,9 @@ function createStateStore(filePath) {
      * @param {{ x: number, y: number, width?: number, height?: number }} position
      */
     setWindowPosition(windowName, position) {
+      if (!Number.isFinite(position?.x) || !Number.isFinite(position?.y)) {
+        return;
+      }
       const next = {
         x: Math.round(position.x),
         y: Math.round(position.y)

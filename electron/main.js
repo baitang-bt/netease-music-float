@@ -38,6 +38,7 @@ const {
 } = require("./lyric-overlay");
 const { createFloatLyricsController } = require("./float-lyrics");
 const { createAutoUpdater } = require("./auto-update");
+const { toScreenInt, setWindowFrame } = require("./window-geometry");
 const {
   importCustomFont,
   removeCustomFontFile,
@@ -162,7 +163,8 @@ function setFloatExpanded(expanded) {
   floatWindow.setMinimumSize(FLOAT_MIN_WIDTH, FLOAT_HEIGHT_COLLAPSED);
   floatWindow.setMaximumSize(FLOAT_MAX_WIDTH, FLOAT_MAX_EXPANDED_HEIGHT);
   floatBoundsAnimating = true;
-  floatWindow.setBounds(
+  setWindowFrame(
+    floatWindow,
     {
       x: bounds.x,
       y: bounds.y,
@@ -257,7 +259,7 @@ function applyFloatSize(size, options = {}) {
 
   if (floatWindow && !floatWindow.isDestroyed()) {
     const bounds = floatWindow.getBounds();
-    floatWindow.setBounds({
+    setWindowFrame(floatWindow, {
       x: bounds.x,
       y: bounds.y,
       width: floatWidth,
@@ -301,9 +303,11 @@ function createFloatWindow() {
 
   const saved = stateStore.getWindowPosition("float");
   const display = screen.getPrimaryDisplay().workArea;
-  const position = saved || {
-    x: Math.round(display.x + display.width - floatWidth - 24),
-    y: Math.round(display.y + 48)
+  const fallbackX = toScreenInt(display.x + display.width - floatWidth - 24, 24);
+  const fallbackY = toScreenInt(display.y + 48, 48);
+  const position = {
+    x: toScreenInt(saved?.x, fallbackX),
+    y: toScreenInt(saved?.y, fallbackY)
   };
 
   floatExpanded = false;
@@ -969,7 +973,15 @@ function registerIpc() {
     if (!floatWindow || floatWindow.isDestroyed()) {
       return;
     }
-    resizeOrigin = floatWindow.getBounds();
+    const bounds = floatWindow.getBounds();
+    const x = toScreenInt(bounds.x);
+    const y = toScreenInt(bounds.y);
+    const width = toScreenInt(bounds.width);
+    const height = toScreenInt(bounds.height);
+    if (x === null || y === null || width === null || height === null) {
+      return;
+    }
+    resizeOrigin = { x, y, width, height };
     floatBoundsAnimating = false;
     // Keep limits open while the custom handle drives setBounds.
     floatWindow.setResizable(true);
@@ -993,7 +1005,7 @@ function registerIpc() {
     if (floatExpanded) {
       floatExpandedHeight = nextHeight;
     }
-    floatWindow.setBounds({
+    setWindowFrame(floatWindow, {
       x: resizeOrigin.x,
       y: resizeOrigin.y,
       width: nextWidth,
@@ -1165,34 +1177,54 @@ function registerIpc() {
   });
 
   ipcMain.on("float:drag-start", () => {
-    if (!floatWindow) {
+    if (!floatWindow || floatWindow.isDestroyed()) {
       return;
     }
     const bounds = floatWindow.getBounds();
-    dragOrigin = { x: bounds.x, y: bounds.y };
+    const x = toScreenInt(bounds.x);
+    const y = toScreenInt(bounds.y);
+    if (x === null || y === null) {
+      return;
+    }
+    dragOrigin = { x, y };
   });
 
   ipcMain.on("float:drag-move", (_event, deltaX, deltaY) => {
-    if (!floatWindow || !dragOrigin) {
+    if (!floatWindow || floatWindow.isDestroyed() || !dragOrigin) {
       return;
     }
-    floatWindow.setPosition(
-      Math.round(dragOrigin.x + (Number(deltaX) || 0)),
-      Math.round(dragOrigin.y + (Number(deltaY) || 0))
-    );
-  });
-
-  ipcMain.on("float:drag-end", () => {
-    if (!floatWindow) {
+    const dx = Number(deltaX);
+    const dy = Number(deltaY);
+    const x = toScreenInt(dragOrigin.x + (Number.isFinite(dx) ? dx : 0));
+    const y = toScreenInt(dragOrigin.y + (Number.isFinite(dy) ? dy : 0));
+    if (x === null || y === null) {
       return;
     }
     const bounds = floatWindow.getBounds();
-    stateStore.setWindowPosition("float", {
-      x: bounds.x,
-      y: bounds.y,
-      width: floatWidth,
-      height: floatExpanded ? floatExpandedHeight : FLOAT_HEIGHT_COLLAPSED
+    setWindowFrame(floatWindow, {
+      x,
+      y,
+      width: bounds.width,
+      height: bounds.height
     });
+  });
+
+  ipcMain.on("float:drag-end", () => {
+    if (!floatWindow || floatWindow.isDestroyed()) {
+      dragOrigin = null;
+      return;
+    }
+    const bounds = floatWindow.getBounds();
+    const x = toScreenInt(bounds.x);
+    const y = toScreenInt(bounds.y);
+    if (x !== null && y !== null) {
+      stateStore.setWindowPosition("float", {
+        x,
+        y,
+        width: floatWidth,
+        height: floatExpanded ? floatExpandedHeight : FLOAT_HEIGHT_COLLAPSED
+      });
+    }
     dragOrigin = null;
   });
 }
