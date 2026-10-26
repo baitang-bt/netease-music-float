@@ -59,4 +59,19 @@ describe("title font apply", () => {
     assert.equal(segments[1].text, "NetEase · ");
     assert.equal(segments[2].text, "こんにちは");
   });
+
+  it("keeps ASCII digits with the surrounding Latin script", () => {
+    const segments = segmentTextByScript("Love 2020");
+    assert.deepEqual(
+      segments.map((segment) => [segment.script, segment.text]),
+      [["en", "Love 2020"]]
+    );
+  });
+
+  it("starts a leading digit run as Latin", () => {
+    const segments = segmentTextByScript("2020 爱");
+    assert.equal(segments[0].script, "en");
+    assert.equal(segments[0].text, "2020 ");
+    assert.equal(segments[1].script, "zh");
+  });
 });

@@ -121,7 +121,7 @@ function pickPosition(width, occupied) {
  * @param {{
  *   line: string,
  *   translation: string,
- *   lines: { time: number, text: string, translation: string, isCurrent: boolean }[],
+ *   lines: { time: number, text: string, translation: string, isCurrent: boolean, index?: number }[],
  *   showLyric: boolean
  * }} payload
  */
@@ -145,13 +145,15 @@ function renderLyricWindow(payload) {
   // Only print the current line on arrival. Neighboring lines that are already
   // on screen stay (they were previous current lines), but we never preview the
   // next line before it becomes current.
-  win.forEach((entry) => {
-    const key = `${entry.time}`;
+  win.forEach((entry, offset) => {
+    const key = lineIdentity(entry, offset);
     const existing = linePool.get(key);
     if (existing) {
       const wasCurrent = existing.isCurrent;
       existing.isCurrent = entry.isCurrent;
+      existing.rawEntry = entry;
       if (entry.isCurrent) {
+        existing.bornAt = now;
         // Restart typewrite if this line just became current (e.g. after a seek).
         if (!wasCurrent) {
           restartTypewrite(existing, entry);
@@ -169,17 +171,37 @@ function renderLyricWindow(payload) {
     }
   });
 
-  // Fade out the oldest line once it has stayed at least minShowMs, or when the
-  // queue exceeds MAX_LINES (hard cap so fast songs do not pile up lines).
-  while (
-    activeKeys.length > 1 &&
-    (activeKeys.length > MAX_LINES ||
-      now - (linePool.get(activeKeys[0])?.bornAt || now) >= minShowMs)
-  ) {
-    const oldKey = activeKeys.shift();
-    fadeOutLine(linePool.get(oldKey));
-    linePool.delete(oldKey);
+  // Fade out the oldest non-current line once it has stayed at least minShowMs,
+  // or when the queue exceeds MAX_LINES (hard cap so fast songs do not pile up).
+  while (activeKeys.length > 1) {
+    const oldestKey = activeKeys[0];
+    const oldest = linePool.get(oldestKey);
+    if (oldest?.isCurrent) {
+      break;
+    }
+    const overCap = activeKeys.length > MAX_LINES;
+    const oldEnough =
+      now - (oldest?.bornAt || now) >= minShowMs;
+    if (!overCap && !oldEnough) {
+      break;
+    }
+    activeKeys.shift();
+    fadeOutLine(oldest);
+    linePool.delete(oldestKey);
   }
+}
+
+/**
+ * Builds a stable line key from LRC index (preferred) or time+text so two rows
+ * that share a timestamp do not collide in the on-screen pool.
+ * @param {{ time: number, text?: string, index?: number }} entry
+ * @param {number} fallbackOffset
+ */
+function lineIdentity(entry, fallbackOffset) {
+  if (Number.isFinite(entry.index)) {
+    return `${entry.index}:${entry.time}:${entry.text || ""}`;
+  }
+  return `${entry.time}:${fallbackOffset}:${entry.text || ""}`;
 }
 
 function currentOccupied() {
@@ -286,12 +308,7 @@ function makeRow(text, isTranslation) {
  */
 function restartTypewrite(line, entry) {
   const el = line.el;
-  el.querySelectorAll(".lyric-line-row").forEach((row) => {
-    if (row.typewriterTimer) {
-      clearInterval(row.typewriterTimer);
-      row.typewriterTimer = null;
-    }
-  });
+  clearTypewriterTimers(el);
   const mode = lastSettings?.floatLyricsMode || "both";
   buildEmptyRows(el, mode);
   const fadeMs = Number(lastSettings?.floatLyricsFadeMs) || 0;
@@ -357,18 +374,47 @@ function typewrite(el, entry, mode, fadeMs) {
   nextRow();
 }
 
+/** Clears any typewriter interval still attached to a lyric row. */
+function clearTypewriterTimers(el) {
+  if (!el) {
+    return;
+  }
+  el.querySelectorAll(".lyric-line-row").forEach((row) => {
+    if (row.typewriterTimer) {
+      clearInterval(row.typewriterTimer);
+      row.typewriterTimer = null;
+    }
+  });
+}
+
 /** Appends chars to a row at the given interval, then runs onDone. */
 function typewriteRow(row, text, intervalSec, durationMs, onDone) {
   if (!row || !text) {
     onDone?.();
     return;
   }
+  if (row.typewriterTimer) {
+    clearInterval(row.typewriterTimer);
+    row.typewriterTimer = null;
+  }
   const source = String(text);
   let index = 0;
+  let finished = false;
   row.textContent = "";
+  function finish() {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    if (row.typewriterTimer) {
+      clearInterval(row.typewriterTimer);
+      row.typewriterTimer = null;
+    }
+    onDone?.();
+  }
   function pushNext() {
     if (index >= source.length) {
-      onDone?.();
+      finish();
       return;
     }
     const char = source[index];
@@ -379,10 +425,15 @@ function typewriteRow(row, text, intervalSec, durationMs, onDone) {
     span.style.animationDelay = `${Math.random() * 100}ms`;
     span.style.animationDuration = durationMs;
     row.appendChild(span);
+    if (index >= source.length) {
+      finish();
+    }
   }
   pushNext();
-  const timer = setInterval(pushNext, intervalSec * 1000);
-  row.typewriterTimer = timer;
+  if (!finished) {
+    const timer = setInterval(pushNext, intervalSec * 1000);
+    row.typewriterTimer = timer;
+  }
 }
 
 /** Fades a line out (right-to-left per char) and removes it. */
@@ -391,6 +442,7 @@ function fadeOutLine(line) {
     return;
   }
   const el = line.el;
+  clearTypewriterTimers(el);
   if (line.charTimer) {
     clearTimeout(line.charTimer);
   }

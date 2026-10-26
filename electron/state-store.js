@@ -102,10 +102,19 @@ const DEFAULT_FLOAT_SIZE = {
 function createStateStore(filePath) {
   let state = readState(filePath);
 
-  /** Writes the in-memory state to disk. */
+  /** Writes the in-memory state to disk via temp file + rename. */
   function save() {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf8");
+    const payload = JSON.stringify(state, null, 2);
+    const tempPath = `${filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tempPath, payload, "utf8");
+    try {
+      fs.renameSync(tempPath, filePath);
+    } catch {
+      // Windows cannot always rename over an existing destination.
+      fs.copyFileSync(tempPath, filePath);
+      fs.unlinkSync(tempPath);
+    }
   }
 
   return {

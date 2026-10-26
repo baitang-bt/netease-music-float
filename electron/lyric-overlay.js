@@ -220,6 +220,10 @@ function createLyricOverlayController({
     if (!overlay || overlay.isDestroyed()) {
       createOverlay();
     }
+    // createOverlay may bail on invalid bounds — only mark split when live.
+    if (!overlay || overlay.isDestroyed()) {
+      return;
+    }
     applyFloatLevel();
     applyWindowStackLevel(
       overlay,

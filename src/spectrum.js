@@ -60,7 +60,10 @@ function createSpectrumRenderer(canvas) {
     gradient.addColorStop(1, colorTop);
     ctx.fillStyle = gradient;
     for (let i = 0; i < bandCount; i += 1) {
-      const value = Math.max(0.02, Math.min(1, display[i] || 0));
+      const value = Math.min(1, display[i] || 0);
+      if (value < SILENT_BAND) {
+        continue;
+      }
       const barHeight = Math.max(2, value * (height - 2));
       const x = i * (barWidth + gap);
       ctx.fillRect(x, height - barHeight, Math.max(1, barWidth), barHeight);

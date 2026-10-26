@@ -310,11 +310,20 @@ function mountTitleFontPickers(fontIds, importedFonts = []) {
         });
       }
     });
-    root.addEventListener("pointerdown", () => {
-      activeTitleFontLocale = locale;
-    });
+    // Bind once per root — renderSettings remounts pickers on every change.
+    if (!root.dataset.localePointerBound) {
+      root.dataset.localePointerBound = "1";
+      root.addEventListener("pointerdown", () => {
+        activeTitleFontLocale = locale;
+      });
+    }
   });
   syncRemoveFontButton();
+}
+
+/** Formats the typewriter speed label with the active locale unit. */
+function formatCharIntervalLabel(value) {
+  return window.t("settings.floatLyrics.charIntervalUnit", { value });
 }
 
 /**
@@ -468,7 +477,7 @@ function renderSettings(settings) {
   floatLyricsFadeLabel.textContent = `${fadeMs}ms`;
   const charInterval = Number(settings.floatLyricsCharInterval) || 0.1;
   floatLyricsCharIntervalInput.value = String(charInterval);
-  floatLyricsCharIntervalLabel.textContent = `${charInterval}s/字`;
+  floatLyricsCharIntervalLabel.textContent = formatCharIntervalLabel(charInterval);
   const minShowSec = (Number(settings.floatLyricsMinShowMs) || 0) / 1000;
   const maxShowSec = (Number(settings.floatLyricsMaxShowMs) || 0) / 1000;
   floatLyricsMinShowInput.value = String(minShowSec);
@@ -649,7 +658,7 @@ floatLyricsFadeInput.addEventListener("input", (event) => {
 
 floatLyricsCharIntervalInput.addEventListener("input", (event) => {
   const value = Number(event.target.value) || 0.1;
-  floatLyricsCharIntervalLabel.textContent = `${value}s/字`;
+  floatLyricsCharIntervalLabel.textContent = formatCharIntervalLabel(value);
   api.updateSettings({ floatLyricsCharInterval: value });
 });
 

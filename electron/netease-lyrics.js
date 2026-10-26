@@ -107,14 +107,19 @@ function parseLrc(lrc) {
 
 /**
  * True when a lyric line is only credit / instrumental placeholder text.
+ * Credit roles need a separator so real lyrics like "鼓声响起" stay.
  * @param {string} text
  */
 function isMetaLyricLine(text) {
   if (!text) {
     return true;
   }
-  return /^(作词|作曲|编曲|制作人|出品|录音|混音|母带|原唱|和声|吉他|贝斯|鼓|弦乐|版权|翻唱|纯音乐|请欣赏|Instrumental)/i.test(
-    text.trim()
+  const trimmed = text.trim();
+  if (/^(纯音乐|请欣赏|Instrumental)(?:\b|$|\s)/i.test(trimmed)) {
+    return true;
+  }
+  return /^(作词|作曲|编曲|制作人|出品|录音|混音|母带|原唱|和声|吉他|贝斯|鼓|弦乐|版权|翻唱)(?:\s*[:：]|\s+)/.test(
+    trimmed
   );
 }
 
@@ -158,7 +163,7 @@ function lyricLineAt(lines, elapsedSec) {
  * @param {{ time: number, text: string, translation?: string }[]} lines
  * @param {number} elapsedSec
  * @param {number} [radius]
- * @returns {{ time: number, text: string, translation: string, isCurrent: boolean }[]}
+ * @returns {{ time: number, text: string, translation: string, isCurrent: boolean, index: number }[]}
  */
 function lyricWindowAt(lines, elapsedSec, radius = 1) {
   if (!lines || !lines.length) {
@@ -185,13 +190,15 @@ function lyricWindowAt(lines, elapsedSec, radius = 1) {
     time: line.time,
     text: line.text || "",
     translation: line.translation || "",
-    isCurrent: start + offset === safe
+    isCurrent: start + offset === safe,
+    index: start + offset
   }));
 }
 
 /**
  * Pairs each lyric line with the translated line sharing its timestamp.
  * Timestamps may drift slightly between the two LRCs, so nearby lines match.
+ * Each translation is consumed at most once (walk both lists in time order).
  * @param {{ time: number, text: string }[]} lines
  * @param {{ time: number, text: string }[]} translationLines
  * @returns {{ time: number, text: string, translation: string }[]}
@@ -201,20 +208,29 @@ function attachTranslations(lines, translationLines) {
     return lines.map((line) => ({ ...line, translation: "" }));
   }
   const TOLERANCE_SEC = 0.4;
+  const used = new Set();
   return lines.map((line) => {
-    let best = null;
+    let bestIndex = -1;
     let bestDelta = Infinity;
-    for (const candidate of translationLines) {
+    for (let i = 0; i < translationLines.length; i += 1) {
+      if (used.has(i)) {
+        continue;
+      }
+      const candidate = translationLines[i];
       const delta = Math.abs(candidate.time - line.time);
       if (delta < bestDelta) {
-        best = candidate;
+        bestIndex = i;
         bestDelta = delta;
       }
     }
+    const best = bestIndex >= 0 ? translationLines[bestIndex] : null;
     const translation =
       best && bestDelta <= TOLERANCE_SEC && best.text !== line.text
         ? best.text
         : "";
+    if (translation && bestIndex >= 0) {
+      used.add(bestIndex);
+    }
     return { ...line, translation };
   });
 }
@@ -391,6 +407,8 @@ function createLyricsController(options) {
       if (token !== loadToken) {
         return;
       }
+      // Clear the key so the next poll retries this identity after a transient failure.
+      cacheKey = "";
       cache = null;
       emit({
         line: "",

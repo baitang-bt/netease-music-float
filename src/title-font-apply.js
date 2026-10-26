@@ -32,7 +32,8 @@ function classifyScript(char) {
  * @param {string} char
  */
 function isNeutralChar(char) {
-  return /[\s·・•|/\\\-—–…,.!?;:()[\]{}'"`~@#$%^&*+=<>]/.test(char);
+  // ASCII digits follow the previous script (or Latin at the start of a run).
+  return /[\s0-9·・•|/\\\-—–…,.!?;:()[\]{}'"`~@#$%^&*+=<>]/.test(char);
 }
 
 /**
@@ -64,7 +65,7 @@ function segmentTextByScript(text) {
 
   for (const char of source) {
     const script = isNeutralChar(char)
-      ? currentScript || "zh"
+      ? currentScript || (/[0-9]/.test(char) ? "en" : "zh")
       : classifyScript(char);
     if (currentScript && script !== currentScript) {
       flush();

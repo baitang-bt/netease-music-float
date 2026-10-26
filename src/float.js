@@ -42,8 +42,14 @@ let optimisticPlaying = null;
 let trackTitleText = window.t("float.notPlaying");
 /** Whether the title slot is currently showing a lyric line. */
 let showingLyric = false;
+/** Latest lyric payload so locale switches can re-paint the title slot. */
+let lastLyricPayload = null;
 /** Last expanded height pushed to the main process to avoid resize loops. */
 let lastSyncedExpandedHeight = 0;
+/** True while applying an expand state that came from the main process. */
+let applyingRemoteExpanded = false;
+/** When true, commitCollapse must not echo setExpanded back to main. */
+let collapseSkipIpc = false;
 
 /**
  * Resizes the native window to match the expanded chrome height.
@@ -87,7 +93,11 @@ function commitCollapse() {
   if (lastSettings) {
     applyTheme(lastSettings);
   }
-  api.setExpanded(false);
+  const skipIpc = collapseSkipIpc;
+  collapseSkipIpc = false;
+  if (!skipIpc) {
+    api.setExpanded(false);
+  }
 }
 
 /**
@@ -95,8 +105,9 @@ function commitCollapse() {
  * Collapsing fades the expanded chrome out at full size first, so the window
  * never shrinks out from under visible controls.
  * @param {boolean} nextExpanded
+ * @param {{ fromMain?: boolean }} [options]
  */
-function setExpanded(nextExpanded) {
+function setExpanded(nextExpanded, options = {}) {
   const shouldExpand = Boolean(nextExpanded);
   if (expanded === shouldExpand && !collapseFadeTimer) {
     return;
@@ -113,7 +124,9 @@ function setExpanded(nextExpanded) {
     if (lastSettings) {
       applyTheme(lastSettings);
     }
-    api.setExpanded(true);
+    if (!options.fromMain && !applyingRemoteExpanded) {
+      api.setExpanded(true);
+    }
     requestAnimationFrame(() => {
       requestAnimationFrame(syncExpandedWindowHeight);
     });
@@ -122,6 +135,7 @@ function setExpanded(nextExpanded) {
 
   lastSyncedExpandedHeight = 0;
 
+  collapseSkipIpc = Boolean(options.fromMain) || applyingRemoteExpanded;
   appRoot.classList.add("is-leaving");
   collapseFadeTimer = setTimeout(commitCollapse, CHROME_FADE_MS);
 }
@@ -361,6 +375,7 @@ function renderTrack(track) {
     els.statusPill.textContent = window.t("status.error");
     els.statusPill.className = "pill is-warn";
     clearArtwork();
+    setToggleIcon(false);
     return;
   }
 
@@ -374,6 +389,7 @@ function renderTrack(track) {
     els.statusPill.textContent = window.t("status.unmatched");
     els.statusPill.className = "pill is-warn";
     setArtwork(track.artworkDataUrl);
+    setToggleIcon(Boolean(track.playing));
     return;
   }
 
@@ -529,7 +545,7 @@ function setupControls() {
   document.querySelector("#btn-prev").addEventListener("click", () => {
     api.previousTrack();
   });
-  document.querySelector("#btn-toggle").addEventListener("click", () => {
+  document.querySelector("#btn-toggle").addEventListener("click", async () => {
     const currentlyPlaying = els.iconToggle.textContent === "pause";
     optimisticPlaying = !currentlyPlaying;
     setToggleIcon(optimisticPlaying);
@@ -537,7 +553,15 @@ function setupControls() {
       ? window.t("status.playing")
       : window.t("status.paused");
     els.statusPill.className = optimisticPlaying ? "pill is-live" : "pill";
-    api.togglePlayPause();
+    const result = await api.togglePlayPause();
+    if (result && result.ok === false) {
+      optimisticPlaying = currentlyPlaying;
+      setToggleIcon(currentlyPlaying);
+      els.statusPill.textContent = currentlyPlaying
+        ? window.t("status.playing")
+        : window.t("status.paused");
+      els.statusPill.className = currentlyPlaying ? "pill is-live" : "pill";
+    }
   });
   document.querySelector("#btn-next").addEventListener("click", () => {
     api.nextTrack();
@@ -580,6 +604,7 @@ setupControls();
  * }} payload
  */
 function renderLyric(payload) {
+  lastLyricPayload = payload || null;
   if (payload?.line) {
     showingLyric = true;
     window.renderMultilingualText(els.titleText, payload.line);
@@ -674,10 +699,21 @@ function applyUiLocale(settings) {
   if (lastTrack) {
     renderTrack(lastTrack);
   }
+  if (showingLyric && lastLyricPayload?.line) {
+    renderLyric(lastLyricPayload);
+  }
 }
 
 api.getSettings().then(applyTheme);
 api.onSettingsChanged(applyTheme);
 api.onLyricOverlay((payload) => {
   appRoot.classList.toggle("is-lyric-split", Boolean(payload?.active));
+});
+api.onExpandedChanged?.((nextExpanded) => {
+  applyingRemoteExpanded = true;
+  try {
+    setExpanded(nextExpanded, { fromMain: true });
+  } finally {
+    applyingRemoteExpanded = false;
+  }
 });

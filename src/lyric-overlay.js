@@ -44,13 +44,17 @@ function showTitleText(text) {
 function applyTheme(settings) {
   lastSettings = settings;
   const resolved = window.resolveLocale(settings?.locale);
-  if (resolved !== window.getActiveLocale()) {
+  const localeChanged = resolved !== window.getActiveLocale();
+  if (localeChanged) {
     window.setActiveLocale(resolved);
   }
   window.applyFloatDocumentTheme(document.documentElement, appRoot, settings, {
     expanded: false
   });
   appRoot.classList.add("is-collapsed", "is-transparent", "is-lyric-overlay");
+  if (localeChanged && !showingLyric) {
+    renderTrack(lastTrack);
+  }
 }
 
 /**

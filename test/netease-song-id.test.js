@@ -70,4 +70,12 @@ describe("netease song id", () => {
       "Testify"
     ]);
   });
+
+  it("rejects an exact title when the artist does not match", () => {
+    const score = scoreSongMatch(
+      { name: "Love Story", artists: [{ name: "Taylor Swift" }] },
+      { title: "Love Story", artist: "Cover Band" }
+    );
+    assert.ok(score < MIN_API_MATCH_SCORE);
+  });
 });

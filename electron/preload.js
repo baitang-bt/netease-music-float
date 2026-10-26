@@ -76,6 +76,16 @@ contextBridge.exposeInMainWorld("neteaseFloat", {
   setExpanded: (expanded) =>
     ipcRenderer.send("float:set-expanded", Boolean(expanded)),
 
+  /**
+   * Subscribes to expand/collapse driven by the main process (e.g. lyric overlay click).
+   * @param {(expanded: boolean) => void} callback
+   */
+  onExpandedChanged: (callback) => {
+    const listener = (_event, expanded) => callback(Boolean(expanded));
+    ipcRenderer.on("float:expanded", listener);
+    return () => ipcRenderer.removeListener("float:expanded", listener);
+  },
+
   /** Toggles play/pause via MediaRemote. */
   togglePlayPause: () => ipcRenderer.invoke("media:toggle"),
 

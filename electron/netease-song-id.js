@@ -49,6 +49,7 @@ function scoreSongMatch(song, track) {
     return 0;
   }
 
+  let artistMatched = false;
   if (wantArtist) {
     const parts = wantArtist
       .split(/[\/,&，、]/)
@@ -57,6 +58,7 @@ function scoreSongMatch(song, track) {
     for (const part of parts) {
       if (artists.some((artistName) => artistName.includes(part) || part.includes(artistName))) {
         score += 4;
+        artistMatched = true;
       }
     }
   }
@@ -67,6 +69,11 @@ function scoreSongMatch(song, track) {
     } else if (albumName.includes(wantAlbum) || wantAlbum.includes(albumName)) {
       score += 2;
     }
+  }
+
+  // Exact title alone must not beat MIN_API_MATCH_SCORE when the artist differs.
+  if (wantArtist && !artistMatched && score >= MIN_API_MATCH_SCORE) {
+    score = MIN_API_MATCH_SCORE - 1;
   }
 
   return score;
@@ -186,18 +193,24 @@ function lookupSongIdInLocalDb(track) {
   }
 
   try {
-    const sources = [
-      db
-        .prepare(
-          "SELECT id, jsonStr FROM historyTracks ORDER BY playtime DESC LIMIT 80"
-        )
-        .all(),
-      db
-        .prepare(
-          "SELECT id, jsonStr FROM dbTrack WHERE jsonStr LIKE ? LIMIT 40"
-        )
-        .all(`%"name":${JSON.stringify(String(track.title))}%`)
-    ];
+    let sources;
+    try {
+      sources = [
+        db
+          .prepare(
+            "SELECT id, jsonStr FROM historyTracks ORDER BY playtime DESC LIMIT 80"
+          )
+          .all(),
+        db
+          .prepare(
+            "SELECT id, jsonStr FROM dbTrack WHERE jsonStr LIKE ? LIMIT 40"
+          )
+          .all(`%"name":${JSON.stringify(String(track.title))}%`)
+      ];
+    } catch {
+      // Missing tables / SQLITE_BUSY: fall through so the search API can run.
+      return null;
+    }
 
     let bestId = null;
     let bestScore = 0;

@@ -49,6 +49,19 @@ describe("lyrics", () => {
   it("detects credit-only lyric lines as meta", () => {
     assert.equal(isMetaLyricLine("作词 : 某人"), true);
     assert.equal(isMetaLyricLine("今天我 寒夜里看雪飘过"), false);
+    assert.equal(isMetaLyricLine("鼓声响起"), false);
+    assert.equal(isMetaLyricLine("鼓 : Session"), true);
+    assert.equal(isMetaLyricLine("纯音乐"), true);
+    assert.equal(isMetaLyricLine("Instrumental"), true);
+  });
+
+  it("consumes each translation line at most once", () => {
+    const lines = parseLrc("[00:10.00]One\n[00:10.30]Two\n");
+    const translated = parseLrc("[00:10.20]共用译文\n");
+    const merged = attachTranslations(lines, translated);
+    const withTranslation = merged.filter((line) => line.translation);
+    assert.equal(withTranslation.length, 1);
+    assert.equal(withTranslation[0].translation, "共用译文");
   });
 
   it("pairs translated lines with the original by timestamp", () => {

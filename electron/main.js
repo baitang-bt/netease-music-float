@@ -98,6 +98,8 @@ let floatConstraintTimer = null;
 let floatBoundsAnimating = false;
 /** Guards before-quit so async media/audio shutdown can finish before exit. */
 let isQuitting = false;
+/** When true, after cleanup call quitAndInstall instead of app.exit. */
+let quitForUpdateInstall = false;
 let floatWidth = FLOAT_WIDTH_DEFAULT;
 let floatExpandedHeight = FLOAT_HEIGHT_EXPANDED_DEFAULT;
 let latestTrack = {
@@ -181,6 +183,10 @@ function setFloatExpanded(expanded) {
     lyricOverlay?.syncBounds();
   }, FLOAT_RESIZE_ANIMATION_MS);
   lyricOverlay?.ensure();
+  // Tell the float renderer so overlay-driven expands also show chrome.
+  if (floatWindow && !floatWindow.isDestroyed()) {
+    floatWindow.webContents.send("float:expanded", floatExpanded);
+  }
 }
 
 /** Persists the current expanded float size after the user resizes. */
@@ -616,13 +622,15 @@ function toggleSettingsWindow() {
 function applyAlwaysOnTop(alwaysOnTop) {
   if (lyricOverlay) {
     lyricOverlay.ensure();
-    return;
+  } else {
+    applyWindowStackLevel(
+      floatWindow,
+      alwaysOnTop,
+      FLOAT_ALWAYS_ON_TOP_LEVEL
+    );
   }
-  applyWindowStackLevel(
-    floatWindow,
-    alwaysOnTop,
-    FLOAT_ALWAYS_ON_TOP_LEVEL
-  );
+  // Fullscreen floating lyrics keep their own stack level.
+  floatLyrics?.ensure();
 }
 
 /** Joins all Spaces and other apps' fullscreen windows without hiding the Dock icon. */
@@ -751,12 +759,15 @@ async function syncAudioCapture(track) {
     return;
   }
 
+  const token = (captureSyncToken += 1);
+
   if (!track.isTarget) {
     audioCapture.emitSilence();
     if (silenceTimer) {
       clearInterval(silenceTimer);
       silenceTimer = null;
     }
+    await audioCapture.stop();
     return;
   }
 
@@ -764,6 +775,8 @@ async function syncAudioCapture(track) {
     if (!silenceTimer) {
       silenceTimer = setInterval(() => audioCapture.emitSilence(), 80);
     }
+    // Stop the tap so residual PCM cannot overwrite the silence frames.
+    await audioCapture.stop();
     return;
   }
 
@@ -776,7 +789,6 @@ async function syncAudioCapture(track) {
     return;
   }
 
-  const token = (captureSyncToken += 1);
   const nextPids = await resolveCaptureProcessIds(track);
   if (token !== captureSyncToken) {
     return;
@@ -789,6 +801,7 @@ async function syncAudioCapture(track) {
   if (nextPids.length === 0) {
     // Without a known player PID we refuse whole-system capture.
     audioCapture.emitSilence();
+    await audioCapture.stop();
     return;
   }
 
@@ -1172,7 +1185,9 @@ function registerIpc() {
   );
 
   ipcMain.handle("update:install", () => {
-    autoUpdaterController?.quitAndInstall();
+    // Route through before-quit cleanup, then quitAndInstall (not app.exit).
+    quitForUpdateInstall = true;
+    app.quit();
     return { ok: true };
   });
 
@@ -1401,25 +1416,38 @@ app.on("activate", () => {
 
 app.on("before-quit", (event) => {
   if (isQuitting) {
+    // Second pass after cleanup: let quitAndInstall's app.quit() proceed.
     return;
   }
-  // Electron does not await this handler; preventDefault + app.exit so Windows
-  // can shut down the GSMTC backend process instead of leaving it orphaned.
+  // Electron does not await this handler; preventDefault until shutdown finishes
+  // so Windows can stop the GSMTC backend instead of leaving it orphaned.
   event.preventDefault();
   isQuitting = true;
+  const SHUTDOWN_MS = 3000;
   (async () => {
     try {
-      await mediaController?.stop();
-      lyricsController?.stop();
-      lyricOverlay?.destroy();
-      floatLyrics?.destroy();
-      if (silenceTimer) {
-        clearInterval(silenceTimer);
-        silenceTimer = null;
-      }
-      await audioCapture?.stop();
+      await Promise.race([
+        (async () => {
+          await mediaController?.stop();
+          lyricsController?.stop();
+          lyricOverlay?.destroy();
+          floatLyrics?.destroy();
+          if (silenceTimer) {
+            clearInterval(silenceTimer);
+            silenceTimer = null;
+          }
+          await audioCapture?.stop();
+        })(),
+        new Promise((resolve) => setTimeout(resolve, SHUTDOWN_MS))
+      ]);
     } finally {
-      app.exit(0);
+      if (quitForUpdateInstall) {
+        // quitAndInstall re-enters before-quit with isQuitting set so it is not cancelled.
+        autoUpdaterController?.quitAndInstall();
+        setTimeout(() => app.exit(0), 5000);
+      } else {
+        app.exit(0);
+      }
     }
   })();
 });
